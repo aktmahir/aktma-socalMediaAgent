@@ -59,6 +59,17 @@ def main() -> None:
         help="Language for the generated post.",
     )
     parser.add_argument(
+        "--ai-provider",
+        default="openai",
+        choices=["openai", "huggingface", "cohere"],
+        help="The AI provider to use for generation.",
+    )
+    parser.add_argument(
+        "--provider-model",
+        default="",
+        help="Optional provider-specific model name (OpenAI, Hugging Face, or Cohere).",
+    )
+    parser.add_argument(
         "--openai-model",
         default="gpt-3.5-turbo",
         help="OpenAI model to use when OPENAI_API_KEY is available.",
@@ -81,7 +92,13 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    generator = SocialMediaPostGenerator(api_key=None, openai_model=args.openai_model)
+    provider_model = args.provider_model or args.openai_model
+    generator = SocialMediaPostGenerator(
+        api_key=None,
+        openai_model=args.openai_model,
+        provider=args.ai_provider,
+        provider_model=provider_model,
+    )
     post_config = {
         "topic": args.topic,
         "platform": args.platform,
@@ -101,6 +118,8 @@ def main() -> None:
     result = generator.generate_post(**post_config)
 
     print("\n=== Generated Social Media Post ===\n")
+    print(f"Provider: {args.ai_provider.title()}")
+    print(f"Model: {provider_model}")
     print(f"Platform: {result['platform'].title().replace('_', ' ')}")
     print(f"Tone: {result['tone'].title()}")
     print(f"Language: {result['language']}")

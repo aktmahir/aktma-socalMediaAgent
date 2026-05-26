@@ -14,7 +14,9 @@ authors = [
 ]
 dependencies = [
   "openai>=1.0.0",
+  "requests>=2.0.0",
   "Flask>=2.0.0",
+  "python-dotenv>=1.0.0",
 ]
 urls = { "Homepage" = "https://github.com/aktma-socalMediaAgent" }
 

@@ -4,7 +4,7 @@ AI-powered Social Media Post Generator in Python.
 
 ## Overview
 
-This project creates social media posts automatically using OpenAI when an API key is available, with a local fallback generator otherwise. It supports Instagram, LinkedIn, Twitter, and Facebook styles.
+This project creates social media posts automatically using OpenAI, Hugging Face, or Cohere when the selected API key is available, with a local fallback generator otherwise. It supports Instagram, LinkedIn, Twitter, Facebook, YouTube video posts, and YouTube Shorts.
 
 ## Install
 
@@ -21,10 +21,22 @@ This project creates social media posts automatically using OpenAI when an API k
    pip install -r requirements.txt
    ```
 
-3. Optionally set your OpenAI API key:
+3. Create a `.env` file from the example:
 
    ```bash
-   set OPENAI_API_KEY=your_api_key_here
+   copy .env.example .env
+   ```
+
+4. Update `.env` with your provider settings and API keys:
+
+   ```bash
+   AI_PROVIDER=openai
+   OPENAI_API_KEY=your_api_key_here
+   OPENAI_MODEL=gpt-3.5-turbo
+   HUGGINGFACE_API_KEY=your_huggingface_api_key_here
+   HUGGINGFACE_MODEL=gpt2
+   COHERE_API_KEY=your_cohere_api_key_here
+   COHERE_MODEL=command-xlarge-nightly
    ```
 
 4. Install the package locally:
@@ -39,6 +51,12 @@ Generate a social media post from the command line:
 
 ```bash
 python app.py --topic "launching a new product" --platform instagram --tone friendly --length medium
+```
+
+Use a different AI provider with `--ai-provider` and `--provider-model`:
+
+```bash
+python app.py --topic "launching a new product" --platform instagram --tone friendly --length medium --ai-provider huggingface --provider-model gpt2
 ```
 
 Generate a YouTube video post:

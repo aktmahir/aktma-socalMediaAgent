@@ -3,9 +3,29 @@ import random
 from typing import Dict, List, Optional
 
 try:
-    import openai
-except ImportError:  # pragma: no cover
+    from dotenv import load_dotenv  # type: ignore[import]
+except ImportError:
+    load_dotenv = None
+
+try:
+    import openai  # type: ignore[import]
+except ImportError:
     openai = None
+
+try:
+    import requests  # type: ignore[import]
+except ImportError:
+    requests = None
+
+if load_dotenv:
+    load_dotenv()
+
+SUPPORTED_AI_PROVIDERS = ["openai", "huggingface", "cohere"]
+DEFAULT_AI_PROVIDER = "openai"
+HUGGINGFACE_DEFAULT_MODEL = "gpt2"
+COHERE_DEFAULT_MODEL = "command-xlarge-nightly"
+HUGGINGFACE_INFERENCE_URL = "https://api-inference.huggingface.co/models/"
+COHERE_INFERENCE_URL = "https://api.cohere.ai/v1/generate"
 
 PLATFORM_DESCRIPTIONS = {
     "instagram": "a warm, engaging caption with emoji-friendly phrasing and hashtag support",
@@ -42,12 +62,44 @@ DEFAULT_HASHTAG_KEYWORDS = [
 
 
 class SocialMediaPostGenerator:
-    def __init__(self, api_key: Optional[str] = None, openai_model: str = "gpt-3.5-turbo") -> None:
-        self.api_key = api_key or os.getenv("OPENAI_API_KEY")
-        self.openai_model = openai_model
-        self.use_openai = bool(self.api_key and openai)
+    def __init__(
+        self,
+        api_key: Optional[str] = None,
+        openai_model: str = "gpt-3.5-turbo",
+        provider: Optional[str] = None,
+        provider_model: Optional[str] = None,
+    ) -> None:
+        self.provider = (provider or os.getenv("AI_PROVIDER") or DEFAULT_AI_PROVIDER).lower()
+        if self.provider not in SUPPORTED_AI_PROVIDERS:
+            self.provider = DEFAULT_AI_PROVIDER
+
+        self.provider_model = provider_model or self._load_provider_model(self.provider, openai_model)
+        self.api_key = api_key or self._load_api_key_for_provider(self.provider)
+
+        self.use_openai = self.provider == "openai" and bool(self.api_key) and openai is not None
+        self.use_huggingface = self.provider == "huggingface" and bool(self.api_key) and requests is not None
+        self.use_cohere = self.provider == "cohere" and bool(self.api_key) and requests is not None
+
         if self.use_openai:
             openai.api_key = self.api_key
+
+    def _load_api_key_for_provider(self, provider: str) -> Optional[str]:
+        if provider == "openai":
+            return os.getenv("OPENAI_API_KEY")
+        if provider == "huggingface":
+            return os.getenv("HUGGINGFACE_API_KEY")
+        if provider == "cohere":
+            return os.getenv("COHERE_API_KEY")
+        return None
+
+    def _load_provider_model(self, provider: str, openai_model: str) -> str:
+        if provider == "openai":
+            return openai_model
+        if provider == "huggingface":
+            return os.getenv("HUGGINGFACE_MODEL", HUGGINGFACE_DEFAULT_MODEL)
+        if provider == "cohere":
+            return os.getenv("COHERE_MODEL", COHERE_DEFAULT_MODEL)
+        return openai_model
 
     def generate_post(
         self,
@@ -65,8 +117,13 @@ class SocialMediaPostGenerator:
         length = length.lower()
         media_type = media_type.lower()
 
-        if self.use_openai:
+        if self.provider == "openai" and self.use_openai:
             return self._generate_openai(topic, platform, tone, length, language, media_type, media_filename)
+        if self.provider == "huggingface" and self.use_huggingface:
+            return self._generate_huggingface(topic, platform, tone, length, language, media_type, media_filename)
+        if self.provider == "cohere" and self.use_cohere:
+            return self._generate_cohere(topic, platform, tone, length, language, media_type, media_filename)
+
         return self._generate_local(topic, platform, tone, length, language, media_type, media_filename)
 
     def _build_prompt(
@@ -104,12 +161,79 @@ class SocialMediaPostGenerator:
     ) -> Dict[str, object]:
         prompt = self._build_prompt(topic, platform, tone, length, language, media_type, media_filename)
         response = openai.ChatCompletion.create(
-            model=self.openai_model,
+            model=self.provider_model,
             messages=[{"role": "user", "content": prompt}],
             temperature=0.85,
             max_tokens=400,
         )
         content = response.choices[0].message.content.strip()
+        return self._parse_json_response(content, topic, platform, tone, length, language, media_type, media_filename)
+
+    def _generate_huggingface(
+        self,
+        topic: str,
+        platform: str,
+        tone: str,
+        length: str,
+        language: str,
+        media_type: str,
+        media_filename: Optional[str],
+    ) -> Dict[str, object]:
+        prompt = self._build_prompt(topic, platform, tone, length, language, media_type, media_filename)
+        if requests is None:
+            return self._generate_local(topic, platform, tone, length, language, media_type, media_filename)
+
+        response = requests.post(
+            f"{HUGGINGFACE_INFERENCE_URL}{self.provider_model}",
+            headers={"Authorization": f"Bearer {self.api_key}"},
+            json={"inputs": prompt, "parameters": {"max_new_tokens": 400, "temperature": 0.75}},
+            timeout=60,
+        )
+        data = response.json()
+        if isinstance(data, list) and data and "generated_text" in data[0]:
+            content = data[0]["generated_text"].strip()
+        elif isinstance(data, dict):
+            content = data.get("generated_text", "").strip() or data.get("error", "")
+        else:
+            content = ""
+        return self._parse_json_response(content, topic, platform, tone, length, language, media_type, media_filename)
+
+    def _generate_cohere(
+        self,
+        topic: str,
+        platform: str,
+        tone: str,
+        length: str,
+        language: str,
+        media_type: str,
+        media_filename: Optional[str],
+    ) -> Dict[str, object]:
+        prompt = self._build_prompt(topic, platform, tone, length, language, media_type, media_filename)
+        if requests is None:
+            return self._generate_local(topic, platform, tone, length, language, media_type, media_filename)
+
+        response = requests.post(
+            COHERE_INFERENCE_URL,
+            headers={
+                "Authorization": f"Bearer {self.api_key}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "model": self.provider_model,
+                "prompt": prompt,
+                "max_tokens": 300,
+                "temperature": 0.75,
+                "k": 0,
+                "p": 0.75,
+            },
+            timeout=60,
+        )
+        data = response.json()
+        content = ""
+        if isinstance(data, dict) and data.get("generations"):
+            content = str(data["generations"][0].get("text", "")).strip()
+        elif isinstance(data, dict):
+            content = str(data.get("message", "")).strip()
         return self._parse_json_response(content, topic, platform, tone, length, language, media_type, media_filename)
 
     def _parse_json_response(

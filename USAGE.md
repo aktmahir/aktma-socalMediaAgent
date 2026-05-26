@@ -24,7 +24,27 @@ Install the required Python packages:
 pip install -r requirements.txt
 ```
 
-## 3. Optional: install the package locally
+## 3. Create a .env file
+
+Create a `.env` file from the example:
+
+```powershell
+copy .env.example .env
+```
+
+Open `.env` and configure the AI provider plus the API key for the provider you want to use:
+
+```powershell
+AI_PROVIDER=openai
+OPENAI_API_KEY=your_openai_api_key_here
+OPENAI_MODEL=gpt-3.5-turbo
+HUGGINGFACE_API_KEY=your_huggingface_api_key_here
+HUGGINGFACE_MODEL=gpt2
+COHERE_API_KEY=your_cohere_api_key_here
+COHERE_MODEL=command-xlarge-nightly
+```
+
+## 4. Optional: install the package locally
 
 This adds convenient commands and installs the package for local use:
 
@@ -32,12 +52,27 @@ This adds convenient commands and installs the package for local use:
 pip install .
 ```
 
-## 4. Optional: set your OpenAI API key
+## 4. Optional: set your provider API key
 
-If you want AI-powered results from OpenAI, set the environment variable:
+If you want AI-powered results, set the selected provider and its API key in your environment or `.env` file. For example:
 
 ```powershell
+set AI_PROVIDER=openai
 set OPENAI_API_KEY=your_api_key_here
+```
+
+For Hugging Face:
+
+```powershell
+set AI_PROVIDER=huggingface
+set HUGGINGFACE_API_KEY=your_huggingface_api_key_here
+```
+
+For Cohere:
+
+```powershell
+set AI_PROVIDER=cohere
+set COHERE_API_KEY=your_cohere_api_key_here
 ```
 
 ## 5. Generate a post using the CLI
@@ -46,6 +81,12 @@ Basic command:
 
 ```powershell
 python app.py --topic "launching a new product" --platform instagram --tone friendly --length medium
+```
+
+Use a different AI provider with `--ai-provider` and `--provider-model`:
+
+```powershell
+python app.py --topic "launching a new product" --platform instagram --tone friendly --length medium --ai-provider huggingface --provider-model gpt2
 ```
 
 For a video post with a media filename:
@@ -125,5 +166,6 @@ Uploaded media files are stored in the project `uploads/` folder.
 
 - If the app fails to run, make sure the virtual environment is active.
 - Confirm dependencies are installed with `pip install -r requirements.txt`.
-- If OpenAI output is required, verify `OPENAI_API_KEY` is set.
+- If AI output is required, verify the selected `AI_PROVIDER` and corresponding API key are set in `.env`.
+- For Hugging Face or Cohere, also confirm `HUGGINGFACE_API_KEY` or `COHERE_API_KEY` is configured.
 - If the web UI does not allow file upload, confirm the browser can select the supported file type.
