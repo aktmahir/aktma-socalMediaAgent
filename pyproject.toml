@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "aktma-socalmediaagent"
+version = "0.1.0"
+description = "AI-powered social media post generator"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [
+  { name = "Mahir Aktaş" },
+]
+dependencies = [
+  "openai>=1.0.0",
+  "Flask>=2.0.0",
+]
+urls = { "Homepage" = "https://github.com/aktma-socalMediaAgent" }
+
+[project.scripts]
+aktma-socalmediaagent = "app:main"
+aktma-socalmediaagent-web = "social_media_agent.web:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["social_media_agent*"]
+
+[tool.setuptools.package-data]
+"social_media_agent" = ["templates/*.html"]

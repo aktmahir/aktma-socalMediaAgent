@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Social Media Post Generator</title>
+    <style>
+      body { font-family: Arial, sans-serif; margin: 0; padding: 0; background: #f6f8fc; }
+      .page { max-width: 860px; margin: 0 auto; padding: 24px; }
+      .card { background: #fff; box-shadow: 0 16px 40px rgba(0,0,0,0.05); border-radius: 16px; padding: 28px; }
+      .field { margin-bottom: 18px; }
+      label { display: block; margin-bottom: 8px; font-weight: 600; }
+      input, select, textarea { width: 100%; padding: 12px 14px; border: 1px solid #d9dde5; border-radius: 10px; font-size: 14px; }
+      button { padding: 12px 20px; border: none; border-radius: 10px; background: #3b82f6; color: white; cursor: pointer; font-size: 15px; }
+      button:hover { background: #2563eb; }
+      .result { margin-top: 24px; border-top: 1px solid #e5e7eb; padding-top: 24px; }
+      .badge { display: inline-block; margin: 4px 6px 4px 0; padding: 8px 12px; background: #eef2ff; color: #3730a3; border-radius: 999px; font-size: 13px; }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <div class="card">
+        <h1>Social Media Post Generator</h1>
+        <p>Create captions, hashtags, and CTAs instantly with AI or a smart fallback.</p>
+
+        <form method="post" enctype="multipart/form-data">
+          <div class="field">
+            <label for="topic">Topic or theme</label>
+            <input id="topic" name="topic" type="text" required value="{{ values.topic }}" placeholder="e.g. launching a new product">
+          </div>
+          {% if status_message %}
+          <div class="field" style="background:#ecfdf5; border:1px solid #d1fae5; padding:14px; border-radius:12px; color:#065f46;">
+            <strong>Scheduler:</strong> {{ status_message }}
+          </div>
+          {% endif %}
+
+          <div class="field">
+            <label for="platform">Platform</label>
+            <select id="platform" name="platform">
+              {% for platform in platforms %}
+              <option value="{{ platform }}" {% if platform == values.platform %}selected{% endif %}>{{ platform.replace('_', ' ').title() }}</option>
+              {% endfor %}
+            </select>
+          </div>
+
+          <div class="field">
+            <label for="media_type">Media type</label>
+            <select id="media_type" name="media_type">
+              {% for media_type in media_types %}
+              <option value="{{ media_type }}" {% if media_type == values.media_type %}selected{% endif %}>{{ media_type.title() }}</option>
+              {% endfor %}
+            </select>
+          </div>
+
+          <div class="field">
+            <label for="media_file">Upload image or video</label>
+            <input id="media_file" name="media_file" type="file" accept="image/*,video/*">
+            {% if values.media_filename %}
+            <p>Uploaded file: {{ values.media_filename }}</p>
+            {% endif %}
+          </div>
+
+          <div class="field">
+            <label for="interval">Schedule interval (optional)</label>
+            <input id="interval" name="interval" type="text" value="{{ values.interval }}" placeholder="e.g. 30m, 1h, 1d">
+          </div>
+
+          <div class="field">
+            <label for="count">Scheduled post count</label>
+            <input id="count" name="count" type="number" min="0" value="{{ values.count }}" placeholder="0 for unlimited">
+          </div>
+
+          <div class="field">
+            <label for="scheduled_output">Scheduled output folder</label>
+            <input id="scheduled_output" name="scheduled_output" type="text" value="{{ values.scheduled_output }}" placeholder="scheduled_posts">
+          </div>
+
+          <div class="field">
+            <label for="tone">Tone</label>
+            <select id="tone" name="tone">
+              {% for tone in tones %}
+              <option value="{{ tone }}" {% if tone == values.tone %}selected{% endif %}>{{ tone.title() }}</option>
+              {% endfor %}
+            </select>
+          </div>
+
+          <div class="field">
+            <label for="length">Length</label>
+            <select id="length" name="length">
+              {% for length in lengths %}
+              <option value="{{ length }}" {% if length == values.length %}selected{% endif %}>{{ length.title() }}</option>
+              {% endfor %}
+            </select>
+          </div>
+
+          <div class="field">
+            <label for="language">Language</label>
+            <select id="language" name="language">
+              {% for language in languages %}
+              <option value="{{ language }}" {% if language == values.language %}selected{% endif %}>{{ language }}</option>
+              {% endfor %}
+            </select>
+          </div>
+
+          <button type="submit">Generate Post</button>
+        </form>
+
+        {% if post %}
+        <div class="result">
+          <h2>Generated Post</h2>
+          <p><strong>Platform</strong> {{ post.platform.replace('_', ' ').title() }}</p>
+          {% if post.media_type and post.media_type != 'text' %}
+          <p><strong>Media type</strong> {{ post.media_type.title() }}</p>
+          {% endif %}
+          {% if post.media_filename %}
+          <p><strong>Media file</strong> {{ post.media_filename }}</p>
+          {% endif %}
+          {% if post.title %}
+          <p><strong>YouTube title</strong></p>
+          <p>{{ post.title }}</p>
+          {% endif %}
+          {% if post.description %}
+          <p><strong>YouTube description</strong></p>
+          <p>{{ post.description }}</p>
+          {% endif %}
+          {% if post.tags %}
+          <p><strong>YouTube tags</strong></p>
+          <div>
+            {% for tag in post.tags %}
+            <span class="badge">{{ tag }}</span>
+            {% endfor %}
+          </div>
+          {% endif %}
+          <p><strong>Caption</strong></p>
+          <p>{{ post.caption }}</p>
+          {% if post.call_to_action %}
+          <p><strong>Call to action</strong></p>
+          <p>{{ post.call_to_action }}</p>
+          {% endif %}
+          <p><strong>Hashtags</strong></p>
+          <div>
+            {% for tag in post.hashtags %}
+            <span class="badge">#{{ tag }}</span>
+            {% endfor %}
+          </div>
+        </div>
+        {% endif %}
+      </div>
+    </div>
+  </body>
+</html>
