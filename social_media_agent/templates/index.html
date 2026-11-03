@@ -11,6 +11,7 @@
       .field { margin-bottom: 18px; }
       label { display: block; margin-bottom: 8px; font-weight: 600; }
       input, select, textarea { width: 100%; padding: 12px 14px; border: 1px solid #d9dde5; border-radius: 10px; font-size: 14px; }
+      input[type="checkbox"] { width: auto; padding: 0; border: 0; }
       button { padding: 12px 20px; border: none; border-radius: 10px; background: #3b82f6; color: white; cursor: pointer; font-size: 15px; }
       button:hover { background: #2563eb; }
       .status-message { padding: 14px; border-radius: 12px; }
@@ -63,6 +64,17 @@
             {% if values.media_filename %}
             <p>Uploaded file: {{ values.media_filename }}</p>
             {% endif %}
+          </div>
+          <div class="field">
+            <label>
+              <input name="provider_vision" type="checkbox" value="yes" {% if values.provider_vision %}checked{% endif %}>
+              Enable OpenAI vision analysis for this upload
+            </label>
+            <small>
+              Optional. When checked, the image or up to three sampled video frames are sent to OpenAI using
+              <code>OPENAI_API_KEY</code>. Configure <code>OPENAI_VISION_MODEL</code> if needed.
+              Provider charges and data-handling terms may apply. Leave unchecked to keep semantic vision analysis off.
+            </small>
           </div>
 
           <div class="field">
@@ -123,6 +135,35 @@
           {% if post.media_analysis and post.media_analysis.summary %}
           <p><strong>Local media observations</strong></p>
           <p>{{ post.media_analysis.summary }}</p>
+          {% endif %}
+          {% if post.media_analysis and post.media_analysis.format %}
+          <p><strong>Image metadata</strong></p>
+          <p>
+            {{ post.media_analysis.format }} / {{ post.media_analysis.color_mode }};
+            {{ post.media_analysis.width }}x{{ post.media_analysis.height }};
+            {{ post.media_analysis.frame_count }} frame(s).
+            {% if post.media_analysis.gps_metadata_present %}GPS metadata is present but not displayed.{% endif %}
+          </p>
+          {% endif %}
+          {% if post.media_analysis and post.media_analysis.container %}
+          <p><strong>Video metadata</strong></p>
+          <p>
+            Container: {{ post.media_analysis.container }};
+            duration: {{ post.media_analysis.duration_seconds if post.media_analysis.duration_seconds is not none else 'unknown' }} seconds;
+            {{ post.media_analysis.video_stream_count }} video stream(s),
+            {{ post.media_analysis.audio_stream_count }} audio stream(s).
+          </p>
+          {% for stream in post.media_analysis.video_streams %}
+          <small>Video stream {{ loop.index }}: {{ stream.codec }}, {{ stream.width }}x{{ stream.height }}, {{ stream.frame_rate if stream.frame_rate is not none else 'unknown' }} fps, rotation {{ stream.rotation_degrees if stream.rotation_degrees is not none else 'unknown' }}°.</small>
+          {% endfor %}
+          {% for stream in post.media_analysis.audio_streams %}
+          <small>Audio stream {{ loop.index }}: {{ stream.codec }}, {{ stream.channels if stream.channels is not none else 'unknown' }} channel(s), {{ stream.sample_rate_hz if stream.sample_rate_hz is not none else 'unknown' }} Hz.</small>
+          {% endfor %}
+          {% endif %}
+          {% if post.media_analysis and post.media_analysis.semantic_vision %}
+          <p><strong>OpenAI vision description</strong></p>
+          <p>{{ post.media_analysis.semantic_vision.summary }}</p>
+          <small>Provider: {{ post.media_analysis.semantic_vision.provider }}; model: {{ post.media_analysis.semantic_vision.model }}. Uploaded media was sent to this provider by request.</small>
           {% endif %}
           {% if post.media_analysis and post.media_analysis.malware_scan %}
           <p><strong>Malware scan</strong></p>

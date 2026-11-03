@@ -137,6 +137,7 @@ def create_app() -> Flask:
             "interval": "",
             "count": 0,
             "scheduled_output": "scheduled_posts",
+            "provider_vision": False,
         }
 
     @app.before_request
@@ -209,6 +210,7 @@ def create_app() -> Flask:
             values["length"] = request.form.get("length", "medium")
             values["language"] = request.form.get("language", "English")
             values["interval"] = request.form.get("interval", "").strip()
+            values["provider_vision"] = request.form.get("provider_vision") == "yes"
             values["scheduled_output"] = request.form.get("scheduled_output", "scheduled_posts").strip() or "scheduled_posts"
 
             if not values["topic"] and status_message is None:
@@ -266,8 +268,20 @@ def create_app() -> Flask:
                         if not analysis_complete:
                             stored_path.unlink(missing_ok=True)
                     values["media_filename"] = stored_name
+                    if values["provider_vision"]:
+                        media_analysis["semantic_vision"] = generator.analyze_media_with_vision(
+                            stored_path,
+                            values["media_type"],
+                        )
                 except ValueError as exc:
                     status_message = str(exc)
+
+            if (
+                values["provider_vision"]
+                and not values["media_filename"]
+                and status_message is None
+            ):
+                status_message = "Upload an image or video to use provider vision analysis."
 
             post_config = {
                 "topic": values["topic"],

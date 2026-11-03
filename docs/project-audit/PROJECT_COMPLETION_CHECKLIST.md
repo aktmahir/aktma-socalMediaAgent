@@ -33,7 +33,9 @@ This checklist reflects the current prototype status. Checked items are implemen
 - [x] Lightweight local image/video analysis feeds objective visual observations into content generation; video sampling uses optional FFmpeg.
 - [x] Web uploads enforce a 5 MB limit, allowlisted extensions, matching signatures and media type, and server-generated storage names.
 - [x] Optional ClamAV scans reject detections and label uploads unscanned when ClamAV is unavailable or errors.
-- [ ] Comprehensive media parsing and semantic visual understanding.
+- [x] Bounded image EXIF/orientation and video/audio stream metadata parsing with strict decode/container checks.
+- [x] Optional OpenAI semantic image/video-frame descriptions require an explicit per-upload opt-in.
+- [ ] Exhaustive media validation and reliable semantic interpretation across all content.
 
 ## Security and operations
 

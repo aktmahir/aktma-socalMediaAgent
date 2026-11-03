@@ -55,10 +55,10 @@
 ## Phase 3 — Integration and Data Reliability
 
 ### ROAD-07 — Media upload processing
-- **Status:** Partially implemented; upload validation, optional malware scanning, and bounded local parsing.
-- **Description:** The web upload path enforces a 5 MB per-file limit, allowlisted extensions, matching image/video signatures and selected media type, one file per request, and random server-generated storage names. Optional ClamAV scanning rejects detected files and labels unavailable/error scans as unscanned. Pillow reads image format, mode, animation/frame count, and basic visual measurements. FFprobe reads selected video container/stream metadata; FFmpeg samples up to three low-resolution frames.
-- **Verification:** Regression coverage checks clean/infected/unscanned scanner outcomes, infected-file removal, Pillow metadata, FFprobe metadata, sampled frames, parser/tool failures, and explicit upload cleanup.
-- **Remaining:** ClamAV is optional and must be separately installed and maintained; an unscanned result is not a safety guarantee. This is not comprehensive format validation, semantic image understanding, object/person/event recognition, malware protection when the scanner is unavailable, or broad content validation. Video inspection requires FFprobe and FFmpeg on `PATH`.
+- **Status:** Partially implemented; upload validation, optional malware scanning, bounded format parsing, and opt-in provider vision.
+- **Description:** The web upload path enforces a 5 MB per-file limit, allowlisted extensions, matching signatures and selected media type, one file per request, and random server-generated names. Optional ClamAV rejects detected files and labels unavailable/error scans as unscanned. Pillow validates bounded image frames and reads orientation, format, EXIF tag names, and color profile metadata. FFprobe validates video containers/streams and reads video/audio metadata; FFmpeg samples up to three frames. An unchecked-by-default option sends one image or sampled video frames to an OpenAI vision model for a limited visual description.
+- **Verification:** Regression coverage checks scanner outcomes, infected-file removal, image metadata/orientation/frame limits, video/audio metadata/container validation, vision opt-in and payload forwarding, parser/tool failures, and upload cleanup.
+- **Remaining:** ClamAV is optional and separately maintained; an unscanned result is not a safety guarantee. Parsing is bounded and not exhaustive validation for all malformed/hostile formats. Provider vision requires an OpenAI key and compatible model, sends media externally only after per-upload opt-in, and does not guarantee complete or accurate interpretation. Video inspection requires FFprobe and FFmpeg on `PATH`.
 
 ### ROAD-08 — Operational logging and monitoring
 - **Status:** Partially implemented.
