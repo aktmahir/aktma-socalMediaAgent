@@ -1,3 +1,4 @@
+import logging
 import os
 import random
 from typing import Dict, List, Optional
@@ -19,6 +20,8 @@ except ImportError:
 
 if load_dotenv:
     load_dotenv()
+
+logger = logging.getLogger(__name__)
 
 SUPPORTED_AI_PROVIDERS = ["openai", "huggingface", "cohere"]
 DEFAULT_AI_PROVIDER = "openai"
@@ -83,15 +86,15 @@ class SocialMediaPostGenerator:
 
         if self.use_openai:
             try:
-                if hasattr(openai, "OpenAI"):
-                    self._openai_client = openai.OpenAI(api_key=self.api_key)
-                else:
-                    openai.api_key = self.api_key
-            except Exception:
-                try:
-                    openai.api_key = self.api_key
-                except Exception:
-                    self.use_openai = False
+                if openai is None or not hasattr(openai, "OpenAI"):
+                    raise RuntimeError("The installed OpenAI SDK does not expose the OpenAI client.")
+                self._openai_client = openai.OpenAI(api_key=self.api_key)
+            except Exception as exc:
+                logger.warning(
+                    "Could not initialize the OpenAI client; using local generation (%s).",
+                    type(exc).__name__,
+                )
+                self.use_openai = False
 
     def _load_api_key_for_provider(self, provider: str) -> Optional[str]:
         if provider == "openai":
@@ -171,27 +174,22 @@ class SocialMediaPostGenerator:
     ) -> Dict[str, object]:
         prompt = self._build_prompt(topic, platform, tone, length, language, media_type, media_filename)
 
+        if self._openai_client is None:
+            return self._generate_local(topic, platform, tone, length, language, media_type, media_filename)
+
         try:
-            if self._openai_client is not None:
-                response = self._openai_client.chat.completions.create(
-                    model=self.provider_model,
-                    messages=[{"role": "user", "content": prompt}],
-                    temperature=0.85,
-                    max_tokens=400,
-                )
-                content = (response.choices[0].message.content or "").strip()
-            elif openai is not None and hasattr(openai, "ChatCompletion"):
-                openai.api_key = self.api_key
-                response = openai.ChatCompletion.create(
-                    model=self.provider_model,
-                    messages=[{"role": "user", "content": prompt}],
-                    temperature=0.85,
-                    max_tokens=400,
-                )
-                content = (response.choices[0].message.content or "").strip()
-            else:
-                return self._generate_local(topic, platform, tone, length, language, media_type, media_filename)
-        except Exception:
+            response = self._openai_client.chat.completions.create(
+                model=self.provider_model,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.85,
+                max_tokens=400,
+            )
+            content = (response.choices[0].message.content or "").strip()
+        except Exception as exc:
+            logger.warning(
+                "OpenAI generation failed; using local generation (%s).",
+                type(exc).__name__,
+            )
             return self._generate_local(topic, platform, tone, length, language, media_type, media_filename)
 
         return self._parse_json_response(content, topic, platform, tone, length, language, media_type, media_filename)
@@ -219,7 +217,11 @@ class SocialMediaPostGenerator:
             )
             response.raise_for_status()
             data = response.json()
-        except Exception:
+        except Exception as exc:
+            logger.warning(
+                "Hugging Face generation failed; using local generation (%s).",
+                type(exc).__name__,
+            )
             return self._generate_local(topic, platform, tone, length, language, media_type, media_filename)
 
         if isinstance(data, list) and data and "generated_text" in data[0]:
@@ -263,7 +265,11 @@ class SocialMediaPostGenerator:
             )
             response.raise_for_status()
             data = response.json()
-        except Exception:
+        except Exception as exc:
+            logger.warning(
+                "Cohere generation failed; using local generation (%s).",
+                type(exc).__name__,
+            )
             return self._generate_local(topic, platform, tone, length, language, media_type, media_filename)
 
         content = ""

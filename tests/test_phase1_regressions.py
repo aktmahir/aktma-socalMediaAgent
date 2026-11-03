@@ -1,10 +1,16 @@
 import json
+import sys
+import tempfile
 import unittest
+from contextlib import redirect_stderr
+from io import StringIO
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
+import app as cli_module
 from social_media_agent import generator as generator_module
 from social_media_agent.generator import SocialMediaPostGenerator
+from social_media_agent.scheduler import PeriodicPostScheduler
 from app import parse_interval
 
 
@@ -27,7 +33,7 @@ class PhaseOneRegressionTests(unittest.TestCase):
         self.assertTrue(post["hashtags"])
 
     def test_parse_interval_rejects_non_positive_and_invalid_units(self) -> None:
-        for value in ("0m", "-15m", "15x"):
+        for value in ("0m", "-15m", "15x", "abc"):
             with self.subTest(value=value), self.assertRaises(ValueError):
                 parse_interval(value)
 
@@ -36,6 +42,30 @@ class PhaseOneRegressionTests(unittest.TestCase):
         self.assertEqual(parse_interval("2m"), 120)
         self.assertEqual(parse_interval("1h"), 3600)
         self.assertEqual(parse_interval("1d"), 86400)
+
+    def test_scheduler_rejects_invalid_interval_and_count(self) -> None:
+        generator = Mock()
+        with tempfile.TemporaryDirectory() as output_dir:
+            scheduler = PeriodicPostScheduler(generator, output_dir=output_dir)
+
+            with self.assertRaises(ValueError):
+                scheduler.schedule({}, interval_seconds=0, count=1)
+            with self.assertRaises(ValueError):
+                scheduler.schedule({}, interval_seconds=1, count=-1)
+
+        generator.generate_post.assert_not_called()
+
+    def test_cli_rejects_negative_count_and_invalid_interval(self) -> None:
+        invalid_arguments = (
+            ["app.py", "--topic", "topic", "--count", "-1"],
+            ["app.py", "--topic", "topic", "--interval", "0m"],
+        )
+        for arguments in invalid_arguments:
+            with self.subTest(arguments=arguments):
+                with patch.object(sys, "argv", arguments):
+                    with redirect_stderr(StringIO()), self.assertRaises(SystemExit) as error:
+                        cli_module.main()
+                self.assertEqual(error.exception.code, 2)
 
     def test_openai_uses_current_sdk_client(self) -> None:
         client = Mock()
@@ -55,6 +85,20 @@ class PhaseOneRegressionTests(unittest.TestCase):
 
         self.assertEqual(post["caption"], "mock caption")
         client.chat.completions.create.assert_called_once()
+
+    def test_openai_failure_is_logged_and_falls_back(self) -> None:
+        client = Mock()
+        client.chat.completions.create.side_effect = RuntimeError("provider unavailable")
+        openai_module = Mock()
+        openai_module.OpenAI.return_value = client
+
+        with patch.object(generator_module, "openai", openai_module):
+            generator = SocialMediaPostGenerator(api_key="test-token")
+            with self.assertLogs(generator_module.logger, level="WARNING") as logs:
+                post = generator.generate_post("topic")
+
+        self.assertTrue(post["caption"])
+        self.assertIn("OpenAI generation failed", logs.output[0])
 
     def test_huggingface_and_cohere_use_bearer_token(self) -> None:
         provider_cases = (
@@ -100,8 +144,10 @@ class PhaseOneRegressionTests(unittest.TestCase):
                         api_key="test-token",
                         provider=provider,
                     )
-                    post = getattr(generator, method_name)(
-                        "topic", "instagram", "friendly", "short", "English", "text", None
-                    )
+                    with self.assertLogs(generator_module.logger, level="WARNING") as logs:
+                        post = getattr(generator, method_name)(
+                            "topic", "instagram", "friendly", "short", "English", "text", None
+                        )
 
                 self.assertTrue(post["caption"])
+                self.assertIn("using local generation", logs.output[0])

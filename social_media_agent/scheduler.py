@@ -7,6 +7,27 @@ from typing import Dict, Optional
 from .generator import SocialMediaPostGenerator
 
 
+def parse_interval(interval: str) -> int:
+    if not interval or not interval.strip():
+        return 0
+
+    value = interval.strip()
+    unit = value[-1].lower()
+    try:
+        amount = int(value[:-1])
+    except ValueError as exc:
+        raise ValueError("Interval must be a positive integer followed by s, m, h, or d.") from exc
+
+    if amount <= 0:
+        raise ValueError("Interval must be a positive integer value.")
+
+    multipliers = {"s": 1, "m": 60, "h": 3600, "d": 86400}
+    try:
+        return amount * multipliers[unit]
+    except KeyError as exc:
+        raise ValueError("Interval must end with s, m, h, or d.") from exc
+
+
 class PeriodicPostScheduler:
     def __init__(self, generator: SocialMediaPostGenerator, output_dir: Optional[str] = None) -> None:
         self.generator = generator
@@ -19,6 +40,11 @@ class PeriodicPostScheduler:
         interval_seconds: int,
         count: int = 0,
     ) -> None:
+        if interval_seconds <= 0:
+            raise ValueError("Interval must be a positive number of seconds.")
+        if count < 0:
+            raise ValueError("Scheduled post count must be non-negative.")
+
         iteration = 0
         print(f"Starting periodic posting every {interval_seconds} seconds.")
         print("Press Ctrl+C to stop if running indefinitely.")

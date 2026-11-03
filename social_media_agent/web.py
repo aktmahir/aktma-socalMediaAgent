@@ -3,7 +3,7 @@ from pathlib import Path
 from flask import Flask, render_template, request
 from werkzeug.utils import secure_filename
 from .generator import SocialMediaPostGenerator
-from .scheduler import PeriodicPostScheduler
+from .scheduler import PeriodicPostScheduler, parse_interval
 
 PLATFORMS = ["instagram", "linkedin", "twitter", "facebook", "youtube", "youtube_shorts"]
 MEDIA_TYPES = ["text", "image", "video"]
@@ -16,24 +16,6 @@ ALLOWED_EXTENSIONS = {"png", "jpg", "jpeg", "gif", "mp4", "mov", "avi", "webm", 
 
 def allowed_file(filename: str) -> bool:
     return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
-
-
-def parse_interval(interval: str) -> int:
-    if not interval or not interval.strip():
-        return 0
-    unit = interval[-1].lower()
-    amount = int(interval[:-1])
-    if amount <= 0:
-        raise ValueError("Interval must be a positive integer value.")
-    if unit == "s":
-        return amount
-    if unit == "m":
-        return amount * 60
-    if unit == "h":
-        return amount * 3600
-    if unit == "d":
-        return amount * 86400
-    raise ValueError("Interval must end with s, m, h, or d.")
 
 
 def create_app() -> Flask:
@@ -98,7 +80,7 @@ def create_app() -> Flask:
                 "media_filename": values["media_filename"] or None,
             }
 
-            if values["topic"] and values["interval"]:
+            if values["topic"] and values["interval"] and not status_message:
                 try:
                     interval_seconds = parse_interval(values["interval"])
                 except ValueError as exc:
@@ -115,7 +97,7 @@ def create_app() -> Flask:
                         f"Scheduled posting started every {values['interval']}. "
                         f"Saved output to {values['scheduled_output']}/"
                     )
-            elif values["topic"] and not status_message:
+            elif values["topic"] and not values["interval"] and not status_message:
                 post = generator.generate_post(**post_config)
 
         return render_template(

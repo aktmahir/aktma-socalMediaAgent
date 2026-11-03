@@ -1,24 +1,6 @@
 import argparse
 from social_media_agent.generator import SocialMediaPostGenerator
-from social_media_agent.scheduler import PeriodicPostScheduler
-
-
-def parse_interval(interval: str) -> int:
-    if not interval or not interval.strip():
-        return 0
-    unit = interval[-1].lower()
-    amount = int(interval[:-1])
-    if amount <= 0:
-        raise ValueError("Interval must be a positive integer value.")
-    if unit == "s":
-        return amount
-    if unit == "m":
-        return amount * 60
-    if unit == "h":
-        return amount * 3600
-    if unit == "d":
-        return amount * 86400
-    raise ValueError("Interval must end with s, m, h, or d.")
+from social_media_agent.scheduler import PeriodicPostScheduler, parse_interval
 
 
 def main() -> None:
@@ -94,6 +76,9 @@ def main() -> None:
     )
     args = parser.parse_args()
 
+    if args.count < 0:
+        parser.error("--count must be a non-negative integer.")
+
     provider_model = args.provider_model or args.openai_model
     generator = SocialMediaPostGenerator(
         api_key=None,
@@ -112,7 +97,12 @@ def main() -> None:
     }
 
     if args.interval:
-        interval_seconds = parse_interval(args.interval)
+        try:
+            interval_seconds = parse_interval(args.interval)
+        except ValueError as exc:
+            parser.error(str(exc))
+        if interval_seconds == 0:
+            parser.error("--interval must be a positive duration.")
         scheduler = PeriodicPostScheduler(generator, output_dir=args.scheduled_output)
         scheduler.schedule(post_config, interval_seconds=interval_seconds, count=args.count)
         return
