@@ -28,7 +28,8 @@ This checklist reflects the current prototype status. Checked items are implemen
 - [x] Bounded retry policy records failures and stops after three unexpected generator exceptions.
 - [ ] Provider/model outage policy beyond the existing local fallback behavior.
 - [ ] Actual image/video analysis and content-aware generation.
-- [ ] Upload size and content validation beyond extension checks.
+- [x] Web uploads enforce a 5 MB limit, allowlisted extensions, matching signatures and media type, and server-generated storage names.
+- [ ] Malware scanning, full media parsing, and actual image/video analysis.
 
 ## Security and operations
 
@@ -43,4 +44,4 @@ Jobs left running after process termination can be recovered manually with `--ru
 
 ## Completion gate
 
-Do not treat the application as production-ready until live provider behavior has been verified, web routes have test coverage, and the relevant deployment, security, and scheduler durability requirements are addressed.
+Do not treat the application as production-ready until live provider behavior has been verified, upload malware/content scanning is addressed for the exposure model, web routes have test coverage, and the relevant deployment, security, and scheduler durability requirements are addressed.

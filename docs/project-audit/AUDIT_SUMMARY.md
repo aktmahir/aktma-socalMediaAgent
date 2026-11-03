@@ -16,10 +16,10 @@ The project is a local Python prototype for generating social media content. It 
 
 | Roadmap task | Status | Current evidence |
 | --- | --- | --- |
-| ROAD-04: Automated tests and CI | Implemented; locally verified | 34 `unittest` cases pass locally; GitHub Actions is configured for Python 3.10–3.12. |
+| ROAD-04: Automated tests and CI | Implemented; locally and remotely verified | 45 `unittest` cases pass locally; GitHub Actions run 1 passed its 34-test suite on Python 3.10, 3.11, and 3.12 for commit `20607d3`. |
 | ROAD-05: Persistent scheduling | Implemented for local use | SQLite persists jobs, retry attempts, and generated payloads; CLI supports inspection, pause/resume/cancel, manual recovery through `--run-scheduled JOB_ID`, and expiring leases to prevent concurrent workers. |
 
-The regression suite covers provider success/failure paths, local fallback, schedule parsing, job state persistence/recovery, output files, Flask generation/scheduling routes, supervisor recovery/concurrency limits, and CLI errors. Tests do not make live network calls. CI has not yet been verified on GitHub.
+The regression suite covers provider success/failure paths, local fallback, schedule parsing, job state persistence/recovery, output files, Flask generation/scheduling/upload validation, structured request and scheduler logs, supervisor recovery/concurrency limits, and CLI errors. Tests do not make live network calls. [The GitHub Actions run for commit `20607d3` passed all three Python matrix jobs](https://github.com/aktmahir/aktma-socalMediaAgent/actions/runs/41684526182).
 
 ## Remaining risks and limitations
 
@@ -30,14 +30,14 @@ The regression suite covers provider success/failure paths, local fallback, sche
 - Once generated output is persisted, recovery replays it to the same file without calling the generator again. A process failure before payload persistence may still repeat the provider call.
 - Unexpected generator exceptions are retried up to three total attempts with 1- and 2-second delays; provider adapter fallback is treated as successful generation.
 - Failed jobs can be retried explicitly with `--retry-job JOB_ID`; the command refuses jobs that are not failed.
-- Uploaded file contents are not analyzed; web upload validation is extension-based and not malware/content inspection.
+- Web uploads are limited to 5 MB and checked against allowlisted extensions, initial file signatures, and selected media type; random server names prevent path control and accidental overwrite. Files are not analyzed, fully parsed, or malware-scanned.
 - No authentication, CSRF protection, rate limiting, or production deployment pipeline is provided.
-- Logging currently reports provider fallback failures; comprehensive operational logs and monitoring are not implemented.
+- JSON request/job lifecycle logs are emitted at INFO by CLI/web entry points, but metrics, centralized exception reporting, log retention, and production log-sink configuration are not implemented.
 
 ## Recommended next steps
 
 1. Run credentialed smoke tests for supported providers and document verified model choices.
-2. Verify GitHub Actions on a push or pull request and keep regression coverage current.
+2. Keep regression coverage current as features land.
 3. Configure the opt-in supervisor as an operating-system service/task if unattended recovery is required, and define provider outage behavior.
 4. Add deployment controls, security protections, and operational monitoring before exposing the app beyond localhost.
 

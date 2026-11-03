@@ -19,7 +19,7 @@ The project is a Python application for generating social media content from a t
 - Offers a CLI (`app.py`) and a local Flask interface (`web.py`).
 - Saves generated posts as JSON files and persists schedule configuration/progress in SQLite.
 - Provides CLI commands to inspect, pause, resume, cancel, manually recover, and supervise persisted scheduled jobs.
-- Accepts web uploads by extension and uses the filename as prompt context; it does not analyze file contents.
+- Accepts allowlisted web uploads up to 5 MB with basic signature checks and random server-generated storage names; media contents are not analyzed.
 
 ## Architecture
 

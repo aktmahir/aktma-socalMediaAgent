@@ -7,16 +7,108 @@ import time
 import tempfile
 import unittest
 from contextlib import redirect_stdout
-from io import StringIO
+from io import BytesIO, StringIO
 from pathlib import Path
 from unittest.mock import Mock, patch
 
 import app as cli_module
 from social_media_agent.scheduler import PeriodicPostScheduler
-from social_media_agent.web import create_app
+from social_media_agent.web import MAX_UPLOAD_BYTES, _has_matching_signature, create_app
 
 
 class PhaseTwoCoverageTests(unittest.TestCase):
+    def test_web_logs_request_id_and_status_without_logging_form_content(self) -> None:
+        with patch("social_media_agent.web.SocialMediaPostGenerator", return_value=Mock()):
+            app = create_app()
+            with self.assertLogs("social_media_agent.web", level="INFO") as captured:
+                response = app.test_client().get("/")
+
+        self.assertEqual(response.status_code, 200)
+        request_events = [json.loads(record.getMessage()) for record in captured.records]
+        self.assertEqual(len(request_events), 1)
+        event = request_events[0]
+        self.assertEqual(event["event"], "http.request")
+        self.assertEqual(event["method"], "GET")
+        self.assertEqual(event["status_code"], 200)
+        self.assertEqual(event["request_id"], response.headers["X-Request-ID"])
+        self.assertGreaterEqual(event["duration_ms"], 0)
+        self.assertNotIn("topic", event)
+
+    def test_scheduler_logs_job_lifecycle_without_post_configuration(self) -> None:
+        generator = Mock()
+        generator.generate_post.return_value = {"caption": "Generated"}
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            scheduler = PeriodicPostScheduler(generator, output_dir=tmp_dir)
+            with self.assertLogs("social_media_agent.scheduler", level="INFO") as captured:
+                job_id = scheduler.create_job(
+                    {"topic": "private topic"},
+                    interval_seconds=60,
+                    count=1,
+                )
+                scheduler.run_scheduled_job(job_id)
+
+        events = [json.loads(record.getMessage()) for record in captured.records]
+        event_names = [event["event"] for event in events]
+        self.assertEqual(
+            event_names,
+            [
+                "scheduler.job_created",
+                "scheduler.worker_started",
+                "scheduler.iteration_completed",
+                "scheduler.worker_stopped",
+            ],
+        )
+        self.assertTrue(all(event.get("job_id") == job_id for event in events))
+        self.assertEqual(events[0]["target_count"], 1)
+        self.assertEqual(events[2]["completed_count"], 1)
+        self.assertEqual(events[2]["status"], "completed")
+        self.assertNotIn("private topic", "\n".join(record.getMessage() for record in captured.records))
+
+    def test_scheduler_logs_failure_type_without_error_details(self) -> None:
+        generator = Mock()
+        generator.generate_post.side_effect = RuntimeError("sensitive provider response")
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            scheduler = PeriodicPostScheduler(generator, output_dir=tmp_dir)
+            job_id = scheduler.create_job(
+                {"topic": "topic"},
+                interval_seconds=1,
+                count=1,
+            )
+            with patch("social_media_agent.scheduler.time.sleep"), self.assertLogs(
+                "social_media_agent.scheduler",
+                level="INFO",
+            ) as captured, self.assertRaisesRegex(RuntimeError, "sensitive provider response"):
+                scheduler.run_scheduled_job(job_id)
+
+        events = [
+            json.loads(record.getMessage())
+            for record in captured.records
+            if record.getMessage().startswith("{")
+        ]
+        failure_events = [event for event in events if event["event"] == "scheduler.worker_failed"]
+        self.assertEqual(len(failure_events), 1)
+        self.assertEqual(failure_events[0]["job_id"], job_id)
+        self.assertEqual(failure_events[0]["error_type"], "RuntimeError")
+        self.assertNotIn("sensitive provider response", "\n".join(
+            record.getMessage() for record in captured.records
+        ))
+
+    def test_web_signature_validation_covers_all_allowed_media_extensions(self) -> None:
+        signatures = {
+            ".png": b"\x89PNG\r\n\x1a\n",
+            ".jpg": b"\xff\xd8\xff",
+            ".jpeg": b"\xff\xd8\xff",
+            ".gif": b"GIF89a",
+            ".mp4": b"\x00\x00\x00\x18ftypisom",
+            ".mov": b"\x00\x00\x00\x18ftypqt  ",
+            ".avi": b"RIFF\x00\x00\x00\x00AVI ",
+            ".webm": b"\x1a\x45\xdf\xa3\x42\x82\x84webm",
+            ".m4v": b"\x00\x00\x00\x18ftypM4V ",
+        }
+
+        for extension, signature in signatures.items():
+            with self.subTest(extension=extension):
+                self.assertTrue(_has_matching_signature(extension, signature))
     def test_web_rejects_invalid_schedule_values(self) -> None:
         app = create_app()
         client = app.test_client()
@@ -67,6 +159,271 @@ class PhaseTwoCoverageTests(unittest.TestCase):
         response_text = response.get_data(as_text=True)
         self.assertIn("Generated Post", response_text)
         self.assertIn("AI marketing", response_text)
+
+    def test_web_upload_uses_unique_server_filename_and_checks_media_signature(self) -> None:
+        generator = Mock()
+        generator.generate_post.return_value = {
+            "platform": "instagram",
+            "media_type": "image",
+            "media_filename": None,
+            "title": "",
+            "description": "",
+            "tags": [],
+            "caption": "Image post",
+            "call_to_action": "",
+            "hashtags": [],
+        }
+        generator.provider = "openai"
+        png_data = b"\x89PNG\r\n\x1a\n" + b"test-image"
+        with tempfile.TemporaryDirectory() as upload_dir, patch(
+            "social_media_agent.web.UPLOAD_FOLDER",
+            Path(upload_dir),
+        ), patch(
+            "social_media_agent.web.SocialMediaPostGenerator",
+            return_value=generator,
+        ):
+            app = create_app()
+            client = app.test_client()
+            responses = [
+                client.post(
+                    "/",
+                    data={
+                        "topic": "AI marketing",
+                        "platform": "instagram",
+                        "media_type": "image",
+                        "tone": "friendly",
+                        "length": "medium",
+                        "language": "English",
+                        "interval": "",
+                        "count": "0",
+                        "media_file": (BytesIO(png_data), "../../campaign.png"),
+                    },
+                    content_type="multipart/form-data",
+                )
+                for _ in range(2)
+            ]
+
+            stored_files = list(Path(upload_dir).iterdir())
+            stored_payloads = [path.read_bytes() for path in stored_files]
+
+        self.assertTrue(all(response.status_code == 200 for response in responses))
+        self.assertEqual(len(stored_files), 2)
+        self.assertNotEqual(stored_files[0].name, stored_files[1].name)
+        self.assertTrue(all(path.suffix == ".png" for path in stored_files))
+        self.assertTrue(all(len(path.stem) == 32 for path in stored_files))
+        self.assertEqual(stored_payloads, [png_data, png_data])
+        self.assertTrue(all("../../campaign.png" not in response.get_data(as_text=True) for response in responses))
+
+    def test_web_rejects_upload_with_mismatched_content_without_saving(self) -> None:
+        with tempfile.TemporaryDirectory() as upload_dir, patch(
+            "social_media_agent.web.UPLOAD_FOLDER",
+            Path(upload_dir),
+        ), patch(
+            "social_media_agent.web.SocialMediaPostGenerator",
+            return_value=Mock(),
+        ):
+            app = create_app()
+            response = app.test_client().post(
+                "/",
+                data={
+                    "topic": "AI marketing",
+                    "platform": "instagram",
+                    "media_type": "image",
+                    "tone": "friendly",
+                    "length": "medium",
+                    "language": "English",
+                    "interval": "",
+                    "count": "0",
+                    "media_file": (BytesIO(b"not an image"), "campaign.png"),
+                },
+                content_type="multipart/form-data",
+            )
+
+            stored_files = list(Path(upload_dir).iterdir())
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("contents do not match", response.get_data(as_text=True))
+        self.assertEqual(stored_files, [])
+
+    def test_web_rejects_upload_when_media_type_does_not_match(self) -> None:
+        with tempfile.TemporaryDirectory() as upload_dir, patch(
+            "social_media_agent.web.UPLOAD_FOLDER",
+            Path(upload_dir),
+        ), patch(
+            "social_media_agent.web.SocialMediaPostGenerator",
+            return_value=Mock(),
+        ):
+            app = create_app()
+            response = app.test_client().post(
+                "/",
+                data={
+                    "topic": "AI marketing",
+                    "platform": "instagram",
+                    "media_type": "video",
+                    "tone": "friendly",
+                    "length": "medium",
+                    "language": "English",
+                    "interval": "",
+                    "count": "0",
+                    "media_file": (
+                        BytesIO(b"\x89PNG\r\n\x1a\nvalid-signature"),
+                        "campaign.png",
+                    ),
+                },
+                content_type="multipart/form-data",
+            )
+
+            stored_files = list(Path(upload_dir).iterdir())
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("must match the selected", response.get_data(as_text=True))
+        self.assertEqual(stored_files, [])
+
+    def test_web_does_not_save_upload_when_other_form_validation_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as upload_dir, patch(
+            "social_media_agent.web.UPLOAD_FOLDER",
+            Path(upload_dir),
+        ), patch(
+            "social_media_agent.web.SocialMediaPostGenerator",
+            return_value=Mock(),
+        ):
+            app = create_app()
+            response = app.test_client().post(
+                "/",
+                data={
+                    "topic": "",
+                    "platform": "instagram",
+                    "media_type": "image",
+                    "tone": "friendly",
+                    "length": "medium",
+                    "language": "English",
+                    "interval": "",
+                    "count": "0",
+                    "media_file": (
+                        BytesIO(b"\x89PNG\r\n\x1a\nvalid-signature"),
+                        "campaign.png",
+                    ),
+                },
+                content_type="multipart/form-data",
+            )
+
+            stored_files = list(Path(upload_dir).iterdir())
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Topic is required", response.get_data(as_text=True))
+        self.assertEqual(stored_files, [])
+
+    def test_web_rejects_multiple_uploads_without_saving(self) -> None:
+        with tempfile.TemporaryDirectory() as upload_dir, patch(
+            "social_media_agent.web.UPLOAD_FOLDER",
+            Path(upload_dir),
+        ), patch(
+            "social_media_agent.web.SocialMediaPostGenerator",
+            return_value=Mock(),
+        ):
+            app = create_app()
+            response = app.test_client().post(
+                "/",
+                data={
+                    "topic": "AI marketing",
+                    "platform": "instagram",
+                    "media_type": "image",
+                    "tone": "friendly",
+                    "length": "medium",
+                    "language": "English",
+                    "interval": "",
+                    "count": "0",
+                    "media_file": [
+                        (BytesIO(b"\x89PNG\r\n\x1a\nfirst"), "first.png"),
+                        (BytesIO(b"\x89PNG\r\n\x1a\nsecond"), "second.png"),
+                    ],
+                },
+                content_type="multipart/form-data",
+            )
+
+            stored_files = list(Path(upload_dir).iterdir())
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Upload only one", response.get_data(as_text=True))
+        self.assertEqual(stored_files, [])
+
+    def test_web_rejects_upload_larger_than_five_megabytes(self) -> None:
+        with tempfile.TemporaryDirectory() as upload_dir, patch(
+            "social_media_agent.web.UPLOAD_FOLDER",
+            Path(upload_dir),
+        ), patch(
+            "social_media_agent.web.SocialMediaPostGenerator",
+            return_value=Mock(),
+        ):
+            app = create_app()
+            response = app.test_client().post(
+                "/",
+                data={
+                    "topic": "AI marketing",
+                    "platform": "instagram",
+                    "media_type": "image",
+                    "tone": "friendly",
+                    "length": "medium",
+                    "language": "English",
+                    "interval": "",
+                    "count": "0",
+                    "media_file": (
+                        BytesIO(b"\x89PNG\r\n\x1a\n" + b"x" * MAX_UPLOAD_BYTES),
+                        "campaign.png",
+                    ),
+                },
+                content_type="multipart/form-data",
+            )
+
+            stored_files = list(Path(upload_dir).iterdir())
+
+        self.assertEqual(response.status_code, 413)
+        self.assertIn("5 MB or smaller", response.get_data(as_text=True))
+        self.assertEqual(stored_files, [])
+
+    def test_web_accepts_upload_at_five_megabyte_limit(self) -> None:
+        generator = Mock()
+        generator.generate_post.return_value = {
+            "platform": "instagram",
+            "media_type": "image",
+            "media_filename": None,
+            "title": "",
+            "description": "",
+            "tags": [],
+            "caption": "Image post",
+            "call_to_action": "",
+            "hashtags": [],
+        }
+        generator.provider = "openai"
+        png_data = b"\x89PNG\r\n\x1a\n" + b"x" * (MAX_UPLOAD_BYTES - 8)
+        with tempfile.TemporaryDirectory() as upload_dir, patch(
+            "social_media_agent.web.UPLOAD_FOLDER",
+            Path(upload_dir),
+        ), patch(
+            "social_media_agent.web.SocialMediaPostGenerator",
+            return_value=generator,
+        ):
+            app = create_app()
+            response = app.test_client().post(
+                "/",
+                data={
+                    "topic": "AI marketing",
+                    "platform": "instagram",
+                    "media_type": "image",
+                    "tone": "friendly",
+                    "length": "medium",
+                    "language": "English",
+                    "interval": "",
+                    "count": "0",
+                    "media_file": (BytesIO(png_data), "campaign.png"),
+                },
+                content_type="multipart/form-data",
+            )
+            stored_files = list(Path(upload_dir).iterdir())
+            stored_sizes = [path.stat().st_size for path in stored_files]
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(stored_sizes, [MAX_UPLOAD_BYTES])
 
     def test_web_creates_persistent_job_and_starts_worker_for_schedule(self) -> None:
         scheduler = Mock()

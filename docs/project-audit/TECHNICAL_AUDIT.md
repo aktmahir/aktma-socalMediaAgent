@@ -22,7 +22,7 @@ This architecture remains appropriate for a local prototype. Job state is durabl
 
 ## Input and scheduling
 
-The CLI and web app validate required topics and allowed choices. Interval/count parsing is shared in `scheduler.py`; the scheduler also guards its direct-call arguments. Web upload checks are extension-based and user-visible errors are rendered as status messages.
+The CLI and web app validate required topics and allowed choices. Interval/count parsing is shared in `scheduler.py`; the scheduler also guards its direct-call arguments. Web uploads have a 5 MB cap, allowlisted extensions/signature checks, and user-visible validation errors.
 
 Remaining gaps:
 
@@ -32,14 +32,14 @@ Remaining gaps:
 
 ## Reliability and observability
 
-Provider failures and API-level error responses are logged with fallback context. The app does not yet provide structured request/job identifiers, scheduler lifecycle logs, metrics, tracing, retries, or centralized error reporting.
+Provider failures and API-level error responses are logged with fallback context. Web requests and scheduler lifecycle events also emit JSON records containing request/job IDs and non-sensitive status fields. Metrics, tracing, log retention, and centralized error reporting are not implemented.
 
 ## Security and deployment
 
 - Flask debug mode is disabled and the development server binds to localhost.
 - API keys are read from environment variables or `.env`; a dedicated secret-management and rotation process is not included.
 - There is no authentication, authorization, CSRF protection, or rate limiting.
-- Upload checks rely on filename extensions, not content type inspection, malware scanning, or size limits.
+- Upload checks match basic signatures to extensions and selected media type, but do not fully parse files or scan for malware. Uploaded files are limited to 5 MB and stored under random names outside Flask's static directory.
 - No production WSGI deployment configuration, container image, CD deployment pipeline, or health/readiness endpoints are provided. A GitHub Actions CI workflow runs the test suite.
 
 ## Build and verification status

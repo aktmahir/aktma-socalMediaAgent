@@ -7,13 +7,13 @@
 | MF-001 | OpenAI SDK compatibility | Implemented; mock-tested | P0 | Current OpenAI client path is used; live access remains unverified. |
 | MF-002 | Hugging Face/Cohere authentication and request handling | Implemented; mock-tested | P0 | Bearer auth and fallback behavior are tested; real provider/model availability is not. |
 | MF-003 | Core input and schedule validation | Implemented; tested | P0 | CLI, scheduler, and Flask test-client tests cover core invalid inputs and valid generation. |
-| MF-004 | Automated tests and CI | Implemented; locally verified | P1 | `unittest` regression coverage includes scheduler lifecycle and Flask routes; GitHub Actions runs the suite. |
+| MF-004 | Automated tests and CI | Implemented; locally and remotely verified | P1 | `unittest` regression coverage includes scheduler lifecycle and Flask routes; GitHub Actions passed for Python 3.10–3.12 on commit `20607d3`. |
 | MF-005 | Persistent schedule state | Implemented for local use | P1 | SQLite records jobs and generated outputs; CLI supports listing, pause/resume/cancel, manual recovery, an opt-in supervisor, leases, and three-attempt retries for unexpected generator exceptions. Automatic supervisor startup remains missing. |
 | MF-006 | Authentication and authorization | Missing | P1 | Keep deployment local until access control is added. |
 | MF-007 | Production deployment configuration | Missing | P1 | No production WSGI, health checks, or deploy pipeline. |
 | MF-008 | Actual media analysis | Missing | P2 | Upload name is prompt context; file contents are not processed. |
-| MF-009 | Operational logging and monitoring | Partial | P2 | Provider failures are logged; metrics, structured context, and monitoring are absent. |
-| MF-010 | Operational security hardening | Missing | P1 | No CSRF protection, rate limiting, secret-management service, or upload scanning. |
+| MF-009 | Operational logging and monitoring | Partial | P2 | Provider failures and JSON request/job lifecycle context are logged; metrics, centralized exception reporting, retention, and monitoring remain absent. |
+| MF-010 | Operational security hardening | Missing | P1 | No CSRF protection, rate limiting, secret-management service, or malware scanning. |
 
 ## Remaining work
 
@@ -23,7 +23,7 @@ The adapters now use current request patterns and have mock tests for response p
 
 ### Web test coverage
 
-The form performs basic validation and displays status feedback. Flask test-client tests cover valid generation, invalid schedule input, and valid schedule creation; upload rejection remains a candidate for additional route coverage.
+The form performs basic validation and displays status feedback. Flask test-client coverage includes valid generation/scheduling, invalid schedule input, upload size boundaries, signature/media-type checks, unique storage names, and rejected uploads.
 
 ### Durable scheduling
 
@@ -31,7 +31,7 @@ Scheduling writes files through local process workers and persists job records, 
 
 ### Media workflow
 
-Uploads are stored locally after filename sanitization and extension allowlisting. The app does not inspect content, enforce upload size limits, or perform image/video analysis.
+Uploads are limited to 5 MB, validated against allowlisted extensions, basic signatures, and selected media type, and stored using random server-generated names. The app does not fully parse or malware-scan content or perform image/video analysis.
 
 ### Production operation
 

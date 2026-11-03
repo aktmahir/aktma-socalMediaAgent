@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 from .generator import SocialMediaPostGenerator
+from .observability import log_event
 
 logger = logging.getLogger(__name__)
 
@@ -194,6 +195,13 @@ class PeriodicPostScheduler:
                 ),
             )
             connection.commit()
+            log_event(
+                logger,
+                "scheduler.job_created",
+                job_id=job_id,
+                interval_seconds=interval_seconds,
+                target_count=count,
+            )
             return job_id
         finally:
             connection.close()
@@ -220,6 +228,7 @@ class PeriodicPostScheduler:
         if job["status"] != "running":
             raise ValueError(f"Cannot pause a job with status '{job['status']}'.")
         self._set_job_status(job_id, "paused")
+        log_event(logger, "scheduler.job_paused", job_id=job_id)
 
     def resume_job(self, job_id: str) -> None:
         job = self._get_job(job_id)
@@ -228,6 +237,7 @@ class PeriodicPostScheduler:
         if job["status"] != "paused":
             raise ValueError(f"Cannot resume a job with status '{job['status']}'.")
         self._set_job_status(job_id, "running", next_run_now=True)
+        log_event(logger, "scheduler.job_resumed", job_id=job_id)
 
     def cancel_job(self, job_id: str) -> None:
         job = self._get_job(job_id)
@@ -236,6 +246,7 @@ class PeriodicPostScheduler:
         if job["status"] not in ("running", "paused"):
             raise ValueError(f"Cannot cancel a job with status '{job['status']}'.")
         self._set_job_status(job_id, "cancelled")
+        log_event(logger, "scheduler.job_cancelled", job_id=job_id)
 
     def retry_failed_job(self, job_id: str) -> None:
         connection = self._connect()
@@ -264,6 +275,7 @@ class PeriodicPostScheduler:
         finally:
             connection.close()
 
+        log_event(logger, "scheduler.job_retry_requested", job_id=job_id)
         self.run_scheduled_job(job_id)
 
     def schedule(
@@ -298,6 +310,7 @@ class PeriodicPostScheduler:
         if not self._claim_worker(job_id, owner_token):
             return
 
+        log_event(logger, "scheduler.worker_started", job_id=job_id)
         stop_heartbeat = threading.Event()
         heartbeat_errors: List[Exception] = []
         heartbeat_thread = threading.Thread(
@@ -343,13 +356,12 @@ class PeriodicPostScheduler:
                             raise
                         retry_delay = self.RETRY_BASE_DELAY_SECONDS * (2 ** (attempt - 1))
                         logger.warning(
-                            "Generation attempt %s/%s failed for scheduled job %s; retrying in %s seconds: %s: %s",
+                            "Generation attempt %s/%s failed for scheduled job %s; retrying in %s seconds (error type: %s).",
                             attempt,
                             self.MAX_GENERATION_ATTEMPTS,
                             job_id,
                             retry_delay,
                             type(exc).__name__,
-                            exc,
                         )
                         self._set_next_run(job_id, owner_token, time.time() + retry_delay)
                         continue
@@ -394,13 +406,29 @@ class PeriodicPostScheduler:
                     status,
                     time.time() + int(job["interval_seconds"]),
                 )
+                log_event(
+                    logger,
+                    "scheduler.iteration_completed",
+                    job_id=job_id,
+                    completed_count=completed_count,
+                    status=status,
+                )
                 print(f"[{datetime.now().isoformat()}] Generated scheduled post #{completed_count}: {filename}")
                 if status == "completed":
                     return
+        except Exception as exc:
+            log_event(
+                logger,
+                "scheduler.worker_failed",
+                job_id=job_id,
+                error_type=type(exc).__name__,
+            )
+            raise
         finally:
             stop_heartbeat.set()
             heartbeat_thread.join()
             self._release_worker(job_id, owner_token)
+            log_event(logger, "scheduler.worker_stopped", job_id=job_id)
 
     def run_scheduled_job(self, job_id: str) -> None:
         job = self._get_job(job_id)
@@ -439,6 +467,7 @@ class PeriodicPostScheduler:
                 worker.start()
                 active_workers += 1
                 started += 1
+                log_event(logger, "scheduler.supervised_worker_started", job_id=job_id)
         return started
 
     def run_supervisor(self, poll_interval_seconds: int = 5, max_workers: int = 4) -> None:
@@ -451,6 +480,12 @@ class PeriodicPostScheduler:
             f"Supervising scheduled jobs every {poll_interval_seconds} seconds "
             f"(max workers: {max_workers})."
         )
+        log_event(
+            logger,
+            "scheduler.supervisor_started",
+            poll_interval_seconds=poll_interval_seconds,
+            max_workers=max_workers,
+        )
         print("Press Ctrl+C to stop the supervisor.")
         try:
             while True:
@@ -458,6 +493,7 @@ class PeriodicPostScheduler:
                 time.sleep(poll_interval_seconds)
         except KeyboardInterrupt:
             print("Scheduler supervisor stopped. Running jobs remain persisted for recovery.")
+            log_event(logger, "scheduler.supervisor_stopped")
 
     def _run_supervised_job(self, job_id: str) -> None:
         try:

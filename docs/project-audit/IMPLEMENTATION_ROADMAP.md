@@ -30,7 +30,8 @@
 - **Description:** Expand regression coverage to the scheduler and generator and run it automatically.
 - **Modules:** `tests/`, CI configuration.
 - **Current state:** `unittest` regression tests cover provider mocks and failures, scheduler output/recovery/supervision, and Flask generation and schedule submissions. GitHub Actions runs the suite on pushes and pull requests across Python 3.10–3.12.
-- **Remaining:** Verify the workflow on GitHub and expand coverage as new features land.
+- **Verified:** GitHub Actions run 1 passed all Python 3.10, 3.11, and 3.12 matrix jobs for commit `20607d3`.
+- **Remaining:** Expand coverage as new features land.
 
 ### ROAD-05 — Persistent scheduling
 - **Status:** Implemented for local use with a SQLite worker lease.
@@ -53,12 +54,15 @@
 ## Phase 3 — Integration and Data Reliability
 
 ### ROAD-07 — Media upload processing
-- **Status:** Not started.
-- **Description:** Define safe storage and actual media-aware processing; current implementation only saves files and passes filenames to prompts.
+- **Status:** Partially implemented; upload validation and storage hardened.
+- **Description:** The web upload path enforces a 5 MB per-file limit, allowlisted extensions, matching image/video signatures and selected media type, one file per request, and random server-generated storage names. It validates before writing and stores files outside Flask's static directory.
+- **Verification:** Regression coverage checks each allowed extension's signature, exact/over-limit sizes, random non-overwriting names, signature/type mismatches, multiple files, and invalid form submissions.
+- **Remaining:** Actual media-aware processing, malware scanning, and broader content validation are not implemented.
 
 ### ROAD-08 — Operational logging and monitoring
 - **Status:** Partially implemented.
-- **Description:** Provider failures are logged. Add structured request/job context, scheduler logs, metrics, and operational error reporting.
+- **Description:** Web requests and scheduler lifecycle events emit JSON log records with request/job IDs, status, duration, and safe error types; CLI/web entry points enable INFO logging. Prompts, credentials, file names, and output paths are excluded from these structured records.
+- **Remaining:** Metrics, centralized exception reporting, log retention/rotation, and production log-sink configuration are not implemented.
 
 ## Phase 4 — UX and Product Completeness
 
@@ -82,7 +86,6 @@
 
 ## Recommended next actions
 
-1. Verify the GitHub Actions workflow on a push or pull request.
-2. Run credentialed smoke tests for OpenAI, Hugging Face, and Cohere using supported models.
-3. Configure the opt-in supervisor as an operating-system service/task if unattended recovery is required, and define provider outage behavior.
-4. Add deployment, access-control, and production safeguards before external exposure.
+1. Run credentialed smoke tests for OpenAI, Hugging Face, and Cohere using supported models.
+2. Configure the opt-in supervisor as an operating-system service/task if unattended recovery is required, and define provider outage behavior.
+3. Add deployment, access-control, and production safeguards before external exposure.

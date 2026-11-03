@@ -2,10 +2,12 @@ import argparse
 from datetime import datetime
 
 from social_media_agent.generator import SocialMediaPostGenerator
+from social_media_agent.observability import configure_logging
 from social_media_agent.scheduler import PeriodicPostScheduler, parse_interval
 
 
 def main() -> None:
+    configure_logging()
     parser = argparse.ArgumentParser(
         description="Generate social media posts automatically using AI or a smart local fallback."
     )

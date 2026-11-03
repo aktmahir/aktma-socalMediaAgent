@@ -110,11 +110,11 @@ python web.py
 
 Open `http://127.0.0.1:5000`. The app listens on localhost and starts with Flask debug mode disabled.
 
-The form validates the topic, supported select values, uploaded file extensions, schedule interval, and post count. Scheduling creates a SQLite job and starts a background thread in the current process; closing the process stops that worker but preserves its job record for CLI recovery. A status message includes the job ID for validation or scheduler feedback.
+The form validates the topic, supported select values, uploaded file extensions and signatures, schedule interval, and post count. Uploads are limited to 5 MB each. Scheduling creates a SQLite job and starts a background thread in the current process; closing the process stops that worker but preserves its job record for CLI recovery. A status message includes the job ID for validation or scheduler feedback.
 
 ## 5. Uploads and media limitations
 
-The web form accepts image extensions `png`, `jpg`, `jpeg`, `gif` and video extensions `mp4`, `mov`, `avi`, `webm`, `m4v`. Files are stored in the repository's `uploads/` directory, and the filename is passed as prompt context. File contents are not analyzed or sent to a vision model. The extension allowlist is not a full content or malware inspection.
+The web form accepts image extensions `png`, `jpg`, `jpeg`, `gif` and video extensions `mp4`, `mov`, `avi`, `webm`, `m4v`. Each upload is limited to 5 MB and its initial file signature must match its extension and selected media type. Files are stored under random server-generated names in the repository's `uploads/` directory, so an uploaded name cannot overwrite another file or control its storage path. Invalid submissions are rejected before the upload is written. The app does not serve uploaded files, analyze their contents, or send file bytes to a vision model. Signature checks are not a full parser or malware scan; keep the web app local and do not treat these checks as protection for public uploads.
 
 ## 6. Run regression tests
 
@@ -128,8 +128,9 @@ Tests use mocks for provider requests and do not call external provider APIs. Li
 
 ## Troubleshooting
 
+- CLI and web entry points emit timestamped logs to stderr. Web request and scheduler lifecycle records use JSON messages with request/job IDs and status information; prompt text, credentials, and upload contents are not included in those structured records.
 - Confirm the virtual environment is active and dependencies are installed.
 - Confirm `AI_PROVIDER` and the selected provider's API key are set if AI-provider generation is expected.
 - A provider request failure is logged and returns a local fallback post; inspect application logs when diagnosing provider connectivity, authentication, or model errors.
 - Use a positive interval such as `30m` and a non-negative integer count.
-- Unsupported upload extensions are rejected. Uploaded files are stored locally under `uploads/`.
+- Unsupported extensions, mismatched signatures/media types, multiple files, and uploads over 5 MB are rejected. Uploaded files are stored locally under `uploads/` with generated names.

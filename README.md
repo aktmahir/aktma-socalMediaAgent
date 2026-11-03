@@ -127,7 +127,7 @@ aktma-socalmediaagent-web
 
 ## Upload support
 
-The web UI accepts image and video uploads and passes the stored filename as prompt context; it does not analyze image or video contents. Uploaded files are stored under `uploads/`.
+The web UI accepts allowlisted image and video uploads up to 5 MB each. It checks that the file's initial signature matches the extension and selected media type, then stores it under a random server-generated name to prevent path control and accidental overwrites. Uploaded content is not served or analyzed, and file bytes are not sent to providers. These basic signature checks are not a full parser or malware scan; the upload workflow is intended for local use, not public exposure.
 
 Supported media types:
 - `text`
