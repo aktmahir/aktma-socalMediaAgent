@@ -123,6 +123,7 @@ class SocialMediaPostGenerator:
         language: str = "English",
         media_type: str = "text",
         media_filename: Optional[str] = None,
+        media_analysis: Optional[Dict[str, object]] = None,
     ) -> Dict[str, object]:
         topic = topic.strip()
         if not topic:
@@ -133,13 +134,21 @@ class SocialMediaPostGenerator:
         media_type = media_type.lower()
 
         if self.provider == "openai" and self.use_openai:
-            return self._generate_openai(topic, platform, tone, length, language, media_type, media_filename)
+            return self._generate_openai(
+                topic, platform, tone, length, language, media_type, media_filename, media_analysis
+            )
         if self.provider == "huggingface" and self.use_huggingface:
-            return self._generate_huggingface(topic, platform, tone, length, language, media_type, media_filename)
+            return self._generate_huggingface(
+                topic, platform, tone, length, language, media_type, media_filename, media_analysis
+            )
         if self.provider == "cohere" and self.use_cohere:
-            return self._generate_cohere(topic, platform, tone, length, language, media_type, media_filename)
+            return self._generate_cohere(
+                topic, platform, tone, length, language, media_type, media_filename, media_analysis
+            )
 
-        return self._generate_local(topic, platform, tone, length, language, media_type, media_filename)
+        return self._generate_local(
+            topic, platform, tone, length, language, media_type, media_filename, media_analysis
+        )
 
     def _build_prompt(
         self,
@@ -150,8 +159,17 @@ class SocialMediaPostGenerator:
         language: str,
         media_type: str,
         media_filename: Optional[str],
+        media_analysis: Optional[Dict[str, object]],
     ) -> str:
         file_note = f" The media file is named {media_filename}." if media_filename else ""
+        analysis_note = ""
+        if media_analysis:
+            summary = media_analysis.get("summary")
+            if isinstance(summary, str) and summary:
+                analysis_note = (
+                    f" Local visual analysis signals: {summary} Use these objective signals "
+                    "as limited context; do not infer specific objects or events from them."
+                )
         return (
             f"Compose a social media post for the topic '{topic}'. "
             f"Style it for {platform} as {PLATFORM_DESCRIPTIONS.get(platform, 'a social media post')}. "
@@ -162,6 +180,7 @@ class SocialMediaPostGenerator:
             "Return your answer in JSON with keys: caption, hashtags, call_to_action, title, description, tags. "
             "Hashtags and tags should be arrays of strings without the '#' symbol."
             f"{file_note}"
+            f"{analysis_note}"
         )
 
     def _generate_openai(
@@ -173,11 +192,16 @@ class SocialMediaPostGenerator:
         language: str,
         media_type: str,
         media_filename: Optional[str],
+        media_analysis: Optional[Dict[str, object]],
     ) -> Dict[str, object]:
-        prompt = self._build_prompt(topic, platform, tone, length, language, media_type, media_filename)
+        prompt = self._build_prompt(
+            topic, platform, tone, length, language, media_type, media_filename, media_analysis
+        )
 
         if self._openai_client is None:
-            return self._generate_local(topic, platform, tone, length, language, media_type, media_filename)
+            return self._generate_local(
+                topic, platform, tone, length, language, media_type, media_filename, media_analysis
+            )
 
         try:
             response = self._openai_client.chat.completions.create(
@@ -192,9 +216,13 @@ class SocialMediaPostGenerator:
                 "OpenAI generation failed; using local generation (error type: %s).",
                 type(exc).__name__,
             )
-            return self._generate_local(topic, platform, tone, length, language, media_type, media_filename)
+            return self._generate_local(
+                topic, platform, tone, length, language, media_type, media_filename, media_analysis
+            )
 
-        return self._parse_json_response(content, topic, platform, tone, length, language, media_type, media_filename)
+        return self._parse_json_response(
+            content, topic, platform, tone, length, language, media_type, media_filename, media_analysis
+        )
 
     def _generate_huggingface(
         self,
@@ -205,10 +233,15 @@ class SocialMediaPostGenerator:
         language: str,
         media_type: str,
         media_filename: Optional[str],
+        media_analysis: Optional[Dict[str, object]] = None,
     ) -> Dict[str, object]:
-        prompt = self._build_prompt(topic, platform, tone, length, language, media_type, media_filename)
+        prompt = self._build_prompt(
+            topic, platform, tone, length, language, media_type, media_filename, media_analysis
+        )
         if requests is None:
-            return self._generate_local(topic, platform, tone, length, language, media_type, media_filename)
+            return self._generate_local(
+                topic, platform, tone, length, language, media_type, media_filename, media_analysis
+            )
 
         try:
             response = requests.post(
@@ -224,7 +257,9 @@ class SocialMediaPostGenerator:
                 "Hugging Face generation failed; using local generation (error type: %s).",
                 type(exc).__name__,
             )
-            return self._generate_local(topic, platform, tone, length, language, media_type, media_filename)
+            return self._generate_local(
+                topic, platform, tone, length, language, media_type, media_filename, media_analysis
+            )
 
         if isinstance(data, list) and data and "generated_text" in data[0]:
             content = str(data[0]["generated_text"]).strip()
@@ -234,10 +269,14 @@ class SocialMediaPostGenerator:
                 logger.warning(
                     "Hugging Face returned an error; using local generation."
                 )
-                return self._generate_local(topic, platform, tone, length, language, media_type, media_filename)
+                return self._generate_local(
+                    topic, platform, tone, length, language, media_type, media_filename, media_analysis
+                )
         else:
             content = ""
-        return self._parse_json_response(content, topic, platform, tone, length, language, media_type, media_filename)
+        return self._parse_json_response(
+            content, topic, platform, tone, length, language, media_type, media_filename, media_analysis
+        )
 
     def _generate_cohere(
         self,
@@ -248,10 +287,15 @@ class SocialMediaPostGenerator:
         language: str,
         media_type: str,
         media_filename: Optional[str],
+        media_analysis: Optional[Dict[str, object]] = None,
     ) -> Dict[str, object]:
-        prompt = self._build_prompt(topic, platform, tone, length, language, media_type, media_filename)
+        prompt = self._build_prompt(
+            topic, platform, tone, length, language, media_type, media_filename, media_analysis
+        )
         if requests is None:
-            return self._generate_local(topic, platform, tone, length, language, media_type, media_filename)
+            return self._generate_local(
+                topic, platform, tone, length, language, media_type, media_filename, media_analysis
+            )
 
         try:
             response = requests.post(
@@ -278,7 +322,9 @@ class SocialMediaPostGenerator:
                 "Cohere generation failed; using local generation (error type: %s).",
                 type(exc).__name__,
             )
-            return self._generate_local(topic, platform, tone, length, language, media_type, media_filename)
+            return self._generate_local(
+                topic, platform, tone, length, language, media_type, media_filename, media_analysis
+            )
 
         content = ""
         if isinstance(data, dict) and isinstance(data.get("message"), dict):
@@ -294,13 +340,19 @@ class SocialMediaPostGenerator:
             logger.warning(
                 "Cohere returned an error response; using local generation."
             )
-            return self._generate_local(topic, platform, tone, length, language, media_type, media_filename)
+            return self._generate_local(
+                topic, platform, tone, length, language, media_type, media_filename, media_analysis
+            )
         if not content:
             logger.warning(
                 "Cohere returned no generated text; using local generation."
             )
-            return self._generate_local(topic, platform, tone, length, language, media_type, media_filename)
-        return self._parse_json_response(content, topic, platform, tone, length, language, media_type, media_filename)
+            return self._generate_local(
+                topic, platform, tone, length, language, media_type, media_filename, media_analysis
+            )
+        return self._parse_json_response(
+            content, topic, platform, tone, length, language, media_type, media_filename, media_analysis
+        )
 
     def _parse_json_response(
         self,
@@ -312,6 +364,7 @@ class SocialMediaPostGenerator:
         language: str,
         media_type: str,
         media_filename: Optional[str],
+        media_analysis: Optional[Dict[str, object]],
     ) -> Dict[str, object]:
         try:
             import json
@@ -337,6 +390,7 @@ class SocialMediaPostGenerator:
                 "language": language,
                 "media_type": media_type,
                 "media_filename": media_filename,
+                **({"media_analysis": media_analysis} if media_analysis is not None else {}),
                 "title": title,
                 "description": description,
                 "tags": tags,
@@ -354,6 +408,7 @@ class SocialMediaPostGenerator:
                 "language": language,
                 "media_type": media_type,
                 "media_filename": media_filename,
+                **({"media_analysis": media_analysis} if media_analysis is not None else {}),
                 "title": self._build_youtube_title(topic, platform),
                 "description": self._build_youtube_description(topic, platform, media_type),
                 "tags": self._build_hashtags(topic, platform),
@@ -372,6 +427,7 @@ class SocialMediaPostGenerator:
         language: str,
         media_type: str,
         media_filename: Optional[str],
+        media_analysis: Optional[Dict[str, object]],
     ) -> Dict[str, object]:
         adjectives = {
             "friendly": ["bright", "friendly", "easygoing", "approachable"],
@@ -395,6 +451,10 @@ class SocialMediaPostGenerator:
             media_hint = f" This post centers on an image titled {media_filename}."
         elif media_type == "video":
             media_hint = f" This post complements a video file named {media_filename}."
+        if media_analysis:
+            summary = media_analysis.get("summary")
+            if isinstance(summary, str) and summary:
+                media_hint += f" Local visual observations: {summary}"
 
         fragments = [
             f"{topic.capitalize()} is a great moment to talk about {random.choice(adjectives.get(tone, ['something']))} ideas.{media_hint}",
@@ -429,6 +489,7 @@ class SocialMediaPostGenerator:
             "language": language,
             "media_type": media_type,
             "media_filename": media_filename,
+            **({"media_analysis": media_analysis} if media_analysis is not None else {}),
             "title": title,
             "description": description,
             "tags": tags,

@@ -11,10 +11,19 @@ from io import BytesIO, StringIO
 from pathlib import Path
 from unittest.mock import Mock, patch
 
+from PIL import Image
+
 import app as cli_module
 from social_media_agent.observability import RequestMetrics
 from social_media_agent.scheduler import PeriodicPostScheduler
 from social_media_agent.web import MAX_UPLOAD_BYTES, _has_matching_signature, create_app
+
+
+def _make_png() -> bytes:
+    image = Image.new("RGB", (16, 8), (220, 80, 35))
+    output = BytesIO()
+    image.save(output, format="PNG")
+    return output.getvalue()
 
 
 class PhaseTwoCoverageTests(unittest.TestCase):
@@ -258,7 +267,7 @@ class PhaseTwoCoverageTests(unittest.TestCase):
             "hashtags": [],
         }
         generator.provider = "openai"
-        png_data = b"\x89PNG\r\n\x1a\n" + b"test-image"
+        png_data = _make_png()
         with tempfile.TemporaryDirectory() as upload_dir, patch(
             "social_media_agent.web.UPLOAD_FOLDER",
             Path(upload_dir),
@@ -484,7 +493,8 @@ class PhaseTwoCoverageTests(unittest.TestCase):
             "hashtags": [],
         }
         generator.provider = "openai"
-        png_data = b"\x89PNG\r\n\x1a\n" + b"x" * (MAX_UPLOAD_BYTES - 8)
+        valid_png = _make_png()
+        png_data = valid_png + b"x" * (MAX_UPLOAD_BYTES - len(valid_png))
         with tempfile.TemporaryDirectory() as upload_dir, patch(
             "social_media_agent.web.UPLOAD_FOLDER",
             Path(upload_dir),

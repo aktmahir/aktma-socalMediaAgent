@@ -59,7 +59,7 @@
           <div class="field">
             <label for="media_file">Upload image or video</label>
             <input id="media_file" name="media_file" type="file" accept="image/*,video/*">
-            <small>Maximum size: 5 MB. File type and contents must match.</small>
+            <small>Maximum size: 5 MB. Images are analyzed locally; video sampling requires FFmpeg on PATH.</small>
             {% if values.media_filename %}
             <p>Uploaded file: {{ values.media_filename }}</p>
             {% endif %}
@@ -119,6 +119,11 @@
           {% endif %}
           {% if post.media_filename %}
           <p><strong>Media file</strong> {{ post.media_filename }}</p>
+          {% endif %}
+          {% if post.media_analysis and post.media_analysis.summary %}
+          <p><strong>Local media observations</strong></p>
+          <p>{{ post.media_analysis.summary }}</p>
+          <small>These are basic visual measurements, not object recognition or a safety scan.</small>
           {% endif %}
           {% if post.generation_source == 'local' %}
           <p class="status-message status-warning" role="status" aria-live="polite">

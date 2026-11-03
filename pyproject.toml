@@ -17,6 +17,7 @@ dependencies = [
   "requests>=2.0.0",
   "Flask>=2.0.0",
   "python-dotenv>=1.0.0",
+  "Pillow>=10.0.0,<12.0.0",
 ]
 urls = { "Homepage" = "https://github.com/aktma-socalMediaAgent" }
 

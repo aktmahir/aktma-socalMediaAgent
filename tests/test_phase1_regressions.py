@@ -32,6 +32,7 @@ class PhaseOneRegressionTests(unittest.TestCase):
         )
         self.assertEqual(post["platform"], "linkedin")
         self.assertEqual(post["generation_source"], "local")
+        self.assertNotIn("media_analysis", post)
         self.assertTrue(post["caption"])
         self.assertTrue(post["hashtags"])
 

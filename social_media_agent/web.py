@@ -12,6 +12,7 @@ from werkzeug.exceptions import RequestEntityTooLarge
 from werkzeug.utils import secure_filename
 
 from .generator import SocialMediaPostGenerator
+from .media_analysis import MediaAnalysisError, analyze_media
 from .observability import RequestMetrics, configure_logging, log_event
 from .scheduler import PeriodicPostScheduler, parse_count, parse_interval
 
@@ -198,6 +199,7 @@ def create_app() -> Flask:
         values = default_form_values()
         status_message = None
         status_type = None
+        media_analysis = None
 
         if request.method == "POST":
             values["topic"] = request.form.get("topic", "").strip()
@@ -244,11 +246,18 @@ def create_app() -> Flask:
                 status_message = "Upload only one image or video file at a time."
             elif media_files and media_files[0].filename and status_message is None:
                 try:
-                    values["media_filename"] = _save_uploaded_media(
+                    stored_name = _save_uploaded_media(
                         media_files[0],
                         Path(app.config["UPLOAD_FOLDER"]),
                         values["media_type"],
                     )
+                    stored_path = Path(app.config["UPLOAD_FOLDER"]) / stored_name
+                    try:
+                        media_analysis = analyze_media(stored_path, values["media_type"])
+                    except MediaAnalysisError:
+                        stored_path.unlink(missing_ok=True)
+                        raise
+                    values["media_filename"] = stored_name
                 except ValueError as exc:
                     status_message = str(exc)
 
@@ -261,6 +270,8 @@ def create_app() -> Flask:
                 "media_type": values["media_type"],
                 "media_filename": values["media_filename"] or None,
             }
+            if media_analysis is not None:
+                post_config["media_analysis"] = media_analysis
 
             if values["topic"] and interval_seconds is not None and not status_message:
                 scheduler = PeriodicPostScheduler(generator, output_dir=values["scheduled_output"])
