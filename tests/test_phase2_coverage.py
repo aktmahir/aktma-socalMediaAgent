@@ -203,6 +203,10 @@ class PhaseTwoCoverageTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         response_text = response.get_data(as_text=True)
         self.assertIn("Status:", response_text)
+        self.assertIn(
+            'class="field status-message status-error" role="alert" aria-live="assertive"',
+            response_text,
+        )
         self.assertTrue(
             "positive" in response_text or "non-negative" in response_text,
             response_text,
@@ -450,7 +454,12 @@ class PhaseTwoCoverageTests(unittest.TestCase):
             stored_files = list(Path(upload_dir).iterdir())
 
         self.assertEqual(response.status_code, 413)
-        self.assertIn("5 MB or smaller", response.get_data(as_text=True))
+        response_text = response.get_data(as_text=True)
+        self.assertIn("5 MB or smaller", response_text)
+        self.assertIn(
+            'class="field status-message status-error" role="alert" aria-live="assertive"',
+            response_text,
+        )
         self.assertEqual(stored_files, [])
 
     def test_web_accepts_upload_at_five_megabyte_limit(self) -> None:
@@ -526,7 +535,12 @@ class PhaseTwoCoverageTests(unittest.TestCase):
             )
 
         self.assertEqual(response.status_code, 200)
-        self.assertIn("scheduled-job-id", response.get_data(as_text=True))
+        response_text = response.get_data(as_text=True)
+        self.assertIn("scheduled-job-id", response_text)
+        self.assertIn(
+            'class="field status-message status-success" role="status" aria-live="polite"',
+            response_text,
+        )
         scheduler_class.assert_called_once()
         scheduler.create_job.assert_called_once_with(
             {

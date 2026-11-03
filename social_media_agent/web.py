@@ -183,6 +183,7 @@ def create_app() -> Flask:
             "index.html",
             post=None,
             status_message="The request is too large. Uploaded files must be 5 MB or smaller.",
+            status_type="error",
             values=default_form_values(),
             platforms=PLATFORMS,
             media_types=MEDIA_TYPES,
@@ -196,6 +197,7 @@ def create_app() -> Flask:
         post = None
         values = default_form_values()
         status_message = None
+        status_type = None
 
         if request.method == "POST":
             values["topic"] = request.form.get("topic", "").strip()
@@ -277,6 +279,7 @@ def create_app() -> Flask:
                     f"Scheduled job {job_id} started every {values['interval']}. "
                     f"Saved output to {values['scheduled_output']}/"
                 )
+                status_type = "success"
                 log_event(
                     logger,
                     "web.scheduled_job_created",
@@ -292,10 +295,14 @@ def create_app() -> Flask:
                     provider=generator.provider,
                 )
 
+        if status_message and status_type is None:
+            status_type = "error"
+
         return render_template(
             "index.html",
             post=post,
             status_message=status_message,
+            status_type=status_type,
             values=values,
             platforms=PLATFORMS,
             media_types=MEDIA_TYPES,

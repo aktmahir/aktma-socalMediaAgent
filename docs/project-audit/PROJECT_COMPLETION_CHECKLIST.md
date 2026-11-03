@@ -26,6 +26,7 @@ This checklist reflects the current prototype status. Checked items are implemen
 - [x] Opt-in CLI supervisor scans persisted running jobs and recovers expired workers with a configurable concurrency limit.
 - [x] Optional Windows Task Scheduler registration script starts the supervisor at the current user's logon.
 - [x] Windows logon task is registered on this development machine; repeat per account/host when required.
+- [x] Web validation errors and schedule-start messages have distinct accessible status styling and live-region announcements.
 - [x] Bounded retry policy records failures and stops after three unexpected generator exceptions.
 - [ ] Provider/model outage policy beyond the existing local fallback behavior.
 - [ ] Actual image/video analysis and content-aware generation.

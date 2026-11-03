@@ -68,8 +68,8 @@
 ## Phase 4 — UX and Product Completeness
 
 ### ROAD-09 — Web feedback and state
-- **Status:** Basic status feedback and route tests are implemented; scheduled job IDs link the UI to CLI lifecycle controls.
-- **Description:** Ensure validation errors, generation results, and scheduling status are clear and consistently styled.
+- **Status:** Implemented for current local workflows.
+- **Description:** Validation feedback is announced accessibly as an assertive error; schedule-start feedback is styled and announced as a polite status. Scheduled job IDs link the UI to CLI lifecycle controls.
 
 ## Phase 5 — Production Readiness
 

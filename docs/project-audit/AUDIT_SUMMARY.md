@@ -32,6 +32,7 @@ The regression suite covers provider success/failure paths, local fallback, sche
 - Failed jobs can be retried explicitly with `--retry-job JOB_ID`; the command refuses jobs that are not failed.
 - Web uploads are limited to 5 MB and checked against allowlisted extensions, initial file signatures, and selected media type; random server names prevent path control and accidental overwrite. Files are not analyzed, fully parsed, or malware-scanned.
 - No authentication, CSRF protection, rate limiting, or production deployment pipeline is provided.
+- Web validation errors and schedule-start messages now use distinct colors and accessible live-region announcements.
 - `GET /health` checks application liveness only; it does not verify dependencies or readiness.
 - JSON request/job lifecycle logs are emitted at INFO by CLI/web entry points. `GET /metrics` exposes in-process request counters and duration histograms, but metrics reset on restart; centralized exception reporting, log retention, and production log-sink configuration are not implemented.
 

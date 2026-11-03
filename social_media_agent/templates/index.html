@@ -13,6 +13,9 @@
       input, select, textarea { width: 100%; padding: 12px 14px; border: 1px solid #d9dde5; border-radius: 10px; font-size: 14px; }
       button { padding: 12px 20px; border: none; border-radius: 10px; background: #3b82f6; color: white; cursor: pointer; font-size: 15px; }
       button:hover { background: #2563eb; }
+      .status-message { padding: 14px; border-radius: 12px; }
+      .status-error { background: #fef2f2; border: 1px solid #fecaca; color: #991b1b; }
+      .status-success { background: #ecfdf5; border: 1px solid #d1fae5; color: #065f46; }
       .result { margin-top: 24px; border-top: 1px solid #e5e7eb; padding-top: 24px; }
       .badge { display: inline-block; margin: 4px 6px 4px 0; padding: 8px 12px; background: #eef2ff; color: #3730a3; border-radius: 999px; font-size: 13px; }
     </style>
@@ -29,7 +32,7 @@
             <input id="topic" name="topic" type="text" required value="{{ values.topic }}" placeholder="e.g. launching a new product">
           </div>
           {% if status_message %}
-          <div class="field" style="background:#ecfdf5; border:1px solid #d1fae5; padding:14px; border-radius:12px; color:#065f46;">
+          <div class="field status-message status-{{ status_type }}" role="{{ 'alert' if status_type == 'error' else 'status' }}" aria-live="{{ 'assertive' if status_type == 'error' else 'polite' }}">
             <strong>Status:</strong> {{ status_message }}
           </div>
           {% endif %}
