@@ -28,6 +28,17 @@ def parse_interval(interval: str) -> int:
         raise ValueError("Interval must end with s, m, h, or d.") from exc
 
 
+def parse_count(value: str) -> int:
+    try:
+        count = int(value)
+    except ValueError as exc:
+        raise ValueError("Scheduled post count must be a non-negative integer.") from exc
+
+    if count < 0:
+        raise ValueError("Scheduled post count must be a non-negative integer.")
+    return count
+
+
 class PeriodicPostScheduler:
     def __init__(self, generator: SocialMediaPostGenerator, output_dir: Optional[str] = None) -> None:
         self.generator = generator

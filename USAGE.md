@@ -1,171 +1,106 @@
-# aktma-socalMediaAgent Usage Guide
+# Usage Guide
 
-This guide explains how to install and use the social media post generator app step by step.
+This guide covers installation and the supported CLI and web workflows.
 
-## 1. Create a Python virtual environment
+## 1. Install
 
-Open a terminal and run:
+Create and activate a virtual environment, then install the application dependencies:
 
 ```powershell
 python -m venv .venv
-```
-
-Activate the virtual environment:
-
-```powershell
 .venv\Scripts\activate
-```
-
-## 2. Install dependencies
-
-Install the required Python packages:
-
-```powershell
 pip install -r requirements.txt
 ```
 
-## 3. Create a .env file
-
-Create a `.env` file from the example:
+Copy the example environment file and configure the provider you intend to use:
 
 ```powershell
 copy .env.example .env
 ```
 
-Open `.env` and configure the AI provider plus the API key for the provider you want to use:
+Set `AI_PROVIDER` to `openai`, `huggingface`, or `cohere` and configure that provider's API key. Model settings are optional:
 
-```powershell
+```dotenv
 AI_PROVIDER=openai
 OPENAI_API_KEY=your_openai_api_key_here
-OPENAI_MODEL=gpt-3.5-turbo
-HUGGINGFACE_API_KEY=your_huggingface_api_key_here
-HUGGINGFACE_MODEL=gpt2
-COHERE_API_KEY=your_cohere_api_key_here
-COHERE_MODEL=command-xlarge-nightly
 ```
 
-## 4. Optional: install the package locally
+Hugging Face uses `HUGGINGFACE_API_KEY` and optionally `HUGGINGFACE_MODEL`. Cohere uses `COHERE_API_KEY` and optionally `COHERE_MODEL` (default: `command-a-03-2025`). The Cohere adapter uses the Cohere v2 Chat API. Choose the OpenAI model with `--openai-model`; `--provider-model` overrides the model for any selected provider. Do not commit real API keys.
 
-This adds convenient commands and installs the package for local use:
+The app falls back to local generation when no provider key is configured or a provider request fails. Provider failures are logged. This fallback is useful for local development but does not confirm that an external provider is configured correctly.
+
+Optional: install the package to enable its console scripts:
 
 ```powershell
 pip install .
 ```
 
-## 4. Optional: set your provider API key
-
-If you want AI-powered results, set the selected provider and its API key in your environment or `.env` file. For example:
-
-```powershell
-set AI_PROVIDER=openai
-set OPENAI_API_KEY=your_api_key_here
-```
-
-For Hugging Face:
-
-```powershell
-set AI_PROVIDER=huggingface
-set HUGGINGFACE_API_KEY=your_huggingface_api_key_here
-```
-
-For Cohere:
-
-```powershell
-set AI_PROVIDER=cohere
-set COHERE_API_KEY=your_cohere_api_key_here
-```
-
-## 5. Generate a post using the CLI
-
-Basic command:
+## 2. Generate a post with the CLI
 
 ```powershell
 python app.py --topic "launching a new product" --platform instagram --tone friendly --length medium
 ```
 
-Use a different AI provider with `--ai-provider` and `--provider-model`:
+Available platform choices: `instagram`, `linkedin`, `twitter`, `facebook`, `youtube`, `youtube_shorts`.
+
+Available media types: `text`, `image`, `video`. `--media-filename` adds a filename to the generation context; the CLI does not upload or analyze media.
+
+Select a provider and optionally override its model:
 
 ```powershell
-python app.py --topic "launching a new product" --platform instagram --tone friendly --length medium --ai-provider huggingface --provider-model gpt2
+python app.py --topic "launching a new product" --ai-provider cohere --provider-model command-a-03-2025
 ```
 
-For a video post with a media filename:
+If `--provider-model` is omitted, the selected provider's configured model is used. The OpenAI model is controlled by `--openai-model` (default `gpt-3.5-turbo`); Hugging Face and Cohere use their respective environment model variables or built-in defaults.
+
+Generate YouTube metadata:
 
 ```powershell
-python app.py --topic "new product launch" --platform youtube --media-type video --media-filename launch_clip.mp4 --tone motivational --length medium
+python app.py --topic "new product launch" --platform youtube --media-type video --media-filename launch_clip.mp4
 ```
 
-For a YouTube Short:
+The generator rejects topics that are empty or whitespace-only.
+
+## 3. Schedule generated posts
 
 ```powershell
-python app.py --topic "quick launch tip" --platform youtube_shorts --media-type video --media-filename short_clip.mp4 --tone friendly --length short
+python app.py --topic "weekly marketing tip" --platform instagram --interval 1d --count 7
 ```
 
-## 6. Schedule periodic posting
+- Interval units: `s` (seconds), `m` (minutes), `h` (hours), or `d` (days); the value must be positive.
+- `--count` must be a non-negative integer. `0` means run indefinitely until stopped.
+- Scheduled JSON files are written to `scheduled_posts/` by default; change this with `--scheduled-output`.
+- The scheduler validates interval seconds and count even when called directly.
+- The scheduler is an in-process loop. It has no persistent job records, pause/resume controls, or recovery after app restarts.
 
-To generate posts automatically at a regular interval, use `--interval` and optionally `--count`:
-
-```powershell
-python app.py --topic "weekly marketing tip" --platform instagram --media-type image --media-filename creative.jpg --tone educational --length medium --interval 1d --count 7
-```
-
-- `1d` means every day.
-- `1h` means every hour.
-- `30m` means every 30 minutes.
-- `--count 0` means run until you stop it manually.
-
-Scheduled post output files are written to `scheduled_posts/` by default.
-
-If installed locally, you can also run:
-
-```powershell
-aktma-socalmediaagent
-```
-
-## 7. Use the web interface
-
-Run the Flask web application:
+## 4. Run the web interface
 
 ```powershell
 python web.py
 ```
 
-Open your browser and go to:
+Open `http://127.0.0.1:5000`. The app listens on localhost and starts with Flask debug mode disabled.
 
-```text
-http://127.0.0.1:5000
+The form validates the topic, supported select values, uploaded file extensions, schedule interval, and post count. Scheduling starts a background thread in the current process; closing the process stops that schedule. A status message is shown in the page for validation or scheduler feedback.
+
+## 5. Uploads and media limitations
+
+The web form accepts image extensions `png`, `jpg`, `jpeg`, `gif` and video extensions `mp4`, `mov`, `avi`, `webm`, `m4v`. Files are stored in the repository's `uploads/` directory, and the filename is passed as prompt context. File contents are not analyzed or sent to a vision model. The extension allowlist is not a full content or malware inspection.
+
+## 6. Run regression tests
+
+From the repository root:
+
+```powershell
+python -m unittest discover -s tests -v
 ```
 
-The web app includes scheduling controls, so you can start periodic posting directly from the browser by setting an interval and count.
+Tests use mocks for provider requests and do not call external provider APIs. Live provider integration still requires valid credentials and provider-side model access.
 
-## 7. Upload image or video content
+## Troubleshooting
 
-1. Choose a platform and media type in the web form.
-2. Select `image` or `video` as the media type.
-3. Upload the file using the file chooser.
-4. Submit the form to generate caption, hashtags, and metadata.
-
-Supported file types:
-- Images: `png`, `jpg`, `jpeg`, `gif`
-- Videos: `mp4`, `mov`, `avi`, `webm`, `m4v`
-
-## 8. YouTube metadata output
-
-When generating YouTube video posts, the app can provide:
-- `title`
-- `description`
-- `tags`
-
-These values are included in the CLI output and displayed in the web UI.
-
-## 9. Where uploads are saved
-
-Uploaded media files are stored in the project `uploads/` folder.
-
-## 10. Troubleshooting
-
-- If the app fails to run, make sure the virtual environment is active.
-- Confirm dependencies are installed with `pip install -r requirements.txt`.
-- If AI output is required, verify the selected `AI_PROVIDER` and corresponding API key are set in `.env`.
-- For Hugging Face or Cohere, also confirm `HUGGINGFACE_API_KEY` or `COHERE_API_KEY` is configured.
-- If the web UI does not allow file upload, confirm the browser can select the supported file type.
+- Confirm the virtual environment is active and dependencies are installed.
+- Confirm `AI_PROVIDER` and the selected provider's API key are set if AI-provider generation is expected.
+- A provider request failure is logged and returns a local fallback post; inspect application logs when diagnosing provider connectivity, authentication, or model errors.
+- Use a positive interval such as `30m` and a non-negative integer count.
+- Unsupported upload extensions are rejected. Uploaded files are stored locally under `uploads/`.

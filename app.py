@@ -76,10 +76,14 @@ def main() -> None:
     )
     args = parser.parse_args()
 
+    if not args.topic.strip():
+        parser.error("--topic must not be empty.")
     if args.count < 0:
         parser.error("--count must be a non-negative integer.")
 
-    provider_model = args.provider_model or args.openai_model
+    provider_model = args.provider_model or (
+        args.openai_model if args.ai_provider == "openai" else None
+    )
     generator = SocialMediaPostGenerator(
         api_key=None,
         openai_model=args.openai_model,
@@ -111,7 +115,7 @@ def main() -> None:
 
     print("\n=== Generated Social Media Post ===\n")
     print(f"Provider: {args.ai_provider.title()}")
-    print(f"Model: {provider_model}")
+    print(f"Model: {generator.provider_model}")
     print(f"Platform: {result['platform'].title().replace('_', ' ')}")
     print(f"Tone: {result['tone'].title()}")
     print(f"Language: {result['language']}")

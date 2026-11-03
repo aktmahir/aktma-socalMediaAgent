@@ -3,7 +3,7 @@ from pathlib import Path
 from flask import Flask, render_template, request
 from werkzeug.utils import secure_filename
 from .generator import SocialMediaPostGenerator
-from .scheduler import PeriodicPostScheduler, parse_interval
+from .scheduler import PeriodicPostScheduler, parse_count, parse_interval
 
 PLATFORMS = ["instagram", "linkedin", "twitter", "facebook", "youtube", "youtube_shorts"]
 MEDIA_TYPES = ["text", "image", "video"]
@@ -51,14 +51,28 @@ def create_app() -> Flask:
             values["interval"] = request.form.get("interval", "").strip()
             values["scheduled_output"] = request.form.get("scheduled_output", "scheduled_posts").strip() or "scheduled_posts"
 
-            count_value = (request.form.get("count", "0") or "0").strip()
+            if not values["topic"] and status_message is None:
+                status_message = "Topic is required."
+
+            for field, choices in (
+                ("platform", PLATFORMS),
+                ("media_type", MEDIA_TYPES),
+                ("tone", TONES),
+                ("length", LENGTHS),
+                ("language", LANGUAGES),
+            ):
+                if values[field] not in choices:
+                    values[field] = choices[0]
+                    if status_message is None:
+                        status_message = f"Unsupported {field.replace('_', ' ')} selected."
+
+            count_value = request.form.get("count", "0").strip()
             try:
-                values["count"] = int(count_value)
-                if values["count"] < 0:
-                    raise ValueError
-            except ValueError:
+                values["count"] = parse_count(count_value)
+            except ValueError as exc:
                 values["count"] = 0
-                status_message = "Scheduled post count must be a non-negative integer."
+                if status_message is None:
+                    status_message = str(exc)
 
             media_file = request.files.get("media_file")
             if media_file and media_file.filename:
@@ -68,7 +82,8 @@ def create_app() -> Flask:
                     media_file.save(file_path)
                     values["media_filename"] = filename
                 else:
-                    status_message = "Unsupported media file type. Allowed types: images and common video files."
+                    if status_message is None:
+                        status_message = "Unsupported media file type. Allowed types: images and common video files."
 
             post_config = {
                 "topic": values["topic"],

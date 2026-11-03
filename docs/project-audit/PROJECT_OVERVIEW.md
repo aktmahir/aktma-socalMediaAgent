@@ -1,63 +1,54 @@
 # Project Overview
 
 ## Purpose
-The project is a Python-based social media caption generator designed to help marketers, creators, and agencies generate short-form social content based on a topic, platform, tone, length, and media type. It supports CLI and web-based workflows and includes a local fallback generator when external AI providers are unavailable.
+
+The project is a Python application for generating social media content from a topic, target platform, tone, length, language, and media type. It supports CLI and Flask web workflows, optional external AI providers, local fallback generation, and basic periodic generation to JSON files.
 
 ## Intended audience
+
 - Solo creators and marketing teams
-- Small businesses publishing on multiple platforms
-- Developers prototyping AI content workflows
-- Local experimentation with social caption generation
+- Small businesses preparing content for multiple platforms
+- Developers prototyping social media generation workflows
+- Local experimentation with AI-provider adapters
 
-## Core requirements as implemented
-The project is intended to:
-- generate platform-specific captions for Instagram, LinkedIn, Twitter, Facebook, YouTube, and YouTube Shorts
-- support text, image, and video post styles
-- use OpenAI, Hugging Face, or Cohere when credentials are configured
-- provide a local deterministic fallback when no provider is configured or available
-- allow scheduled/periodic posting from CLI or web UI
-- allow uploaded media files for richer prompt context
+## Current capabilities
 
-## Verified architecture
-Based on the source code, the project has a small layered structure:
-- `app.py` — CLI entry point and argument parsing
-- `social_media_agent/generator.py` — core generation logic and AI provider abstractions
-- `social_media_agent/web.py` — Flask front end and upload form
-- `social_media_agent/scheduler.py` — periodic scheduling loop
-- `social_media_agent/templates/index.html` — simple UI markup and form logic
+- Generates captions, hashtags, and calls to action for Instagram, LinkedIn, Twitter, Facebook, YouTube, and YouTube Shorts.
+- Uses OpenAI, Hugging Face, or Cohere when configured with a key and a usable model.
+- Falls back to a randomized local template generator if no provider is configured or a provider fails.
+- Offers a CLI (`app.py`) and a local Flask interface (`web.py`).
+- Saves scheduled generated posts as JSON files in an in-process loop.
+- Accepts web uploads by extension and uses the filename as prompt context; it does not analyze file contents.
 
-## Technology stack
+## Architecture
+
+- `app.py` — CLI argument parsing and generation/scheduling entry point.
+- `social_media_agent/generator.py` — prompt construction, provider adapters, response parsing, and local fallback.
+- `social_media_agent/web.py` — Flask route, form validation, and upload handling.
+- `social_media_agent/scheduler.py` — shared interval/count parsing and in-process periodic output loop.
+- `social_media_agent/templates/index.html` — server-rendered web form and result/status display.
+- `tests/test_phase1_regressions.py` — `unittest` regression coverage using mocked provider responses.
+
+## Technology
+
 - Python 3.9+
-- Flask for web UI
-- Requests for HTTP client calls
+- Flask for the local web UI
+- Requests for Hugging Face and Cohere HTTP requests
 - OpenAI Python SDK
-- python-dotenv for `.env` support
-- setuptools-based package metadata
+- python-dotenv for local `.env` loading
+- setuptools packaging
+- Python standard-library `unittest` for regression tests
 
-## Frontend and backend architecture
-The current implementation is a lightweight monolith rather than a multi-service application:
-- backend logic is embedded in Python modules
-- there is no database layer, ORM, or API service boundary
-- the web UI is server-rendered HTML and not a modern SPA
-- generated content is produced in memory or saved to JSON files
+## Provider and environment configuration
 
-## Data model and persistence
-There is no persistent database or schema. Current “data” is transient:
-- generated post payloads are returned as dicts
-- scheduled posts are saved as JSON files under a configured folder
-- uploaded files are stored locally under `uploads/`
+Set `AI_PROVIDER` to `openai`, `huggingface`, or `cohere` and configure the corresponding API key. Hugging Face and Cohere model environment variables are `HUGGINGFACE_MODEL` and `COHERE_MODEL`; select the OpenAI model with the CLI `--openai-model` option or the generator's `openai_model` argument. Cohere requests use v2 Chat; provider/model service availability is not guaranteed by the application. Provider request behavior has mock coverage but has not been validated with live credentials.
 
-## External integrations
-The codebase integrates with three provider models:
-- OpenAI via `openai.ChatCompletion.create`
-- Hugging Face via `requests.post` to the inference API
-- Cohere via `requests.post` to the Cohere generate endpoint
+## Persistence and runtime boundaries
 
-## Configuration and security posture
-Configuration is handled through environment variables and `.env` files. There is no secret-management layer, no auth provider, and no production-grade config separation.
+There is no database. Generated posts are returned as dictionaries or written as JSON files. Scheduled jobs are process-local and are lost when the process exits. Uploaded files are stored under `uploads/`.
 
-## Current implementation status
-The project is a working demo/prototype in its current form, but it is not production-ready. It has a credible local fallback and a useful CLI/web workflow, yet several core provider integrations and infrastructure assumptions are incomplete or broken.
+The web runner binds to localhost with Flask debug disabled. This is not a production deployment configuration; there is no authentication, authorization, CSRF protection, rate limiting, or production server setup.
 
-## Summary assessment
-This is best described as a functional prototype for AI-generated social captions with local scheduling and UI scaffolding. It is not yet a robust production system because the AI integrations are partially broken, testing is absent, deployment readiness is missing, and operational safeguards are not in place.
+## Current status
+
+Phase 1 provider compatibility, request error handling, and core CLI/web/scheduler validation are implemented with regression tests. Remaining Phase 1 confidence work includes live provider smoke tests and Flask test-client coverage. Persistent scheduling, richer media processing, multi-user access, and deployment hardening remain future work.

@@ -1,45 +1,36 @@
 # Audit Summary
 
-## Overall assessment
-The project is a promising local prototype for AI-assisted social media caption generation. It has a usable local fallback, a simple Flask interface, and a clear structure for CLI use, but the current implementation is not reliable enough for production or even controlled production-like usage because multiple provider integrations are broken and there is no automated quality process.
+## Current assessment
 
-## Current completion estimate
-Estimated implementation completeness: 35% to 45% for a real-world product baseline.
+The project is a local Python prototype for generating social media content. It provides CLI and Flask web workflows, three external provider adapters, a local fallback, and an in-process scheduler that writes JSON files. Phase 1 stabilization has addressed the known provider request issues and basic input validation. The project is still not production-ready.
 
-## Major strengths
-- simple and understandable architecture
-- clear project purpose and target user problem
-- local generation fallback provides a working demo path
-- UI and CLI are both available and aligned to project intent
-- generated outputs include caption, hashtags, CTA, and YouTube metadata
+## Phase 1 status
 
-## Critical weaknesses
-- OpenAI integration uses a deprecated API pattern
-- Hugging Face and Cohere auth logic is effectively unusable
-- no automated test suite or CI validation
-- no persistent scheduling state or lifecycle management
-- no authentication, production deployment, or hardened configuration
-- no operational logging or monitoring
+| Roadmap task | Status | Current evidence |
+| --- | --- | --- |
+| ROAD-01: OpenAI SDK compatibility | Implemented; mocked | Uses the current `OpenAI` client and has success/fallback tests. No live credentialed call has been made. |
+| ROAD-02: Hugging Face and Cohere requests | Implemented; mocked | Bearer auth and response parsing are covered with mocks; Cohere uses v2 Chat. Live provider/model access remains unverified. |
+| ROAD-03: Input and scheduler validation | Implemented; locally tested | CLI, web form, shared interval/count parsers, and scheduler enforce basic input constraints. Automated tests cover parser, CLI, and scheduler boundaries; web route behavior has not been exercised in a test client. |
 
-## Highest-priority missing functionality
-1. working AI provider integrations
-2. reliable request validation and graceful error handling
-3. scheduler persistence and observability
-4. automated quality and regression checks
-5. production-safe deployment and secret management
+The regression suite currently runs with Python's built-in `unittest` and covers provider success/failure paths, local fallback, schedule parsing, scheduler argument guards, and CLI errors. It does not make live network calls.
 
-## Priority distribution
-- P0: 3
-- P1: 5
-- P2: 4
-- P3: 3
+## Remaining risks and limitations
 
-## Recommended implementation sequence
-1. repair provider integrations
-2. stabilize scheduler and user input validation
-3. add tests and CI
-4. add persistence and auth if needed for shared deployment
-5. add production configuration and monitoring
+- Provider behavior has not been validated using real credentials or current provider-side model access.
+- Hugging Face inference availability and model compatibility depend on provider service support.
+- Scheduler state is in-memory only; jobs cannot be inspected, resumed, paused, or recovered after restart.
+- The web scheduler uses a daemon thread and is not durable.
+- Uploaded file contents are not analyzed; web upload validation is extension-based and not malware/content inspection.
+- No authentication, CSRF protection, rate limiting, deployment pipeline, or persistent database is provided.
+- Logging currently reports provider fallback failures; comprehensive operational logs and monitoring are not implemented.
 
-## Best next step
-Begin with the provider integration fixes in `social_media_agent/generator.py` and the validation sweep in `social_media_agent/web.py` before building any larger feature set. Those issues are currently the clearest blockers to the project’s core business value.
+## Recommended next steps
+
+1. Run credentialed smoke tests for supported providers and document verified model choices.
+2. Add Flask test-client coverage for valid and invalid web form submissions.
+3. Decide whether the scheduler should remain a local prototype or gain persistent job state.
+4. Add deployment controls, security protections, and operational monitoring before exposing the app beyond localhost.
+
+## Overall conclusion
+
+The app is a functional local prototype with improved Phase 1 validation and provider adapters. Its provider behavior is mock-verified rather than live-verified, and its scheduling, media handling, and deployment features remain prototype-level.

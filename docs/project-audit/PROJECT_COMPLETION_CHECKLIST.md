@@ -1,42 +1,38 @@
 # Project Completion Checklist
 
-## Must-have business functionality
-- [ ] local generation works without any external AI provider
-- [ ] the selected platform produces an appropriate style of caption
-- [ ] CLI generation works for text, image, and video scenarios
-- [ ] web UI generation works and shows result details
-- [ ] scheduled posts can be created and tracked reliably
-- [ ] YouTube metadata generation behaves correctly when applicable
+This checklist reflects the current prototype status. Checked items are implemented or locally verified; they do not imply production readiness.
 
-## Must-have technical requirements
-- [ ] all external provider integrations are functional and tested
-- [ ] environment variables and API keys are validated before runtime calls
-- [ ] invalid input is caught and reported without crashes
-- [ ] scheduler state is persisted and can be inspected
-- [ ] logs and error reporting exist for operator visibility
-- [ ] application startup is no longer configured for debug mode in production
+## Phase 1 — critical fixes and stabilization
 
-## Quality and security requirements
-- [ ] secret management is in place
-- [ ] no hard-coded secret-like placeholders remain in runtime code
-- [ ] input validation covers all public-facing forms and CLI arguments
-- [ ] upload handling validates both extension and content safety
-- [ ] access control is enforced if the app is exposed to multiple users
-- [ ] dependency versions are pinned or managed through a lockfile
+- [x] Local fallback generates the documented output fields.
+- [x] OpenAI uses the current SDK client API; mocked success and failure tests pass.
+- [x] Hugging Face and Cohere use Bearer authentication and mock-tested response parsing.
+- [x] Cohere adapter uses v2 Chat request/response format.
+- [x] Provider transport and error-payload failures are logged and fall back locally.
+- [x] CLI rejects empty topics, negative counts, and invalid schedule intervals.
+- [x] Web form validates basic topic, option, extension, count, and interval input.
+- [x] Scheduler rejects non-positive intervals and negative counts on direct calls.
+- [x] Regression tests pass using Python's built-in `unittest` runner.
+- [ ] Credentialed live smoke tests for each external provider.
+- [ ] Flask test-client coverage for valid and invalid form submissions.
 
-## Testing and validation requirements
-- [ ] critical generation pathways have automated tests
-- [ ] invalid input scenarios are covered
-- [ ] scheduler lifecycle behavior is verified
-- [ ] web endpoints or routes are smoke-tested
-- [ ] production build or runtime start command is verified in a clean environment
+## Core product and reliability
 
-## Operational readiness
-- [ ] deployment documentation exists
-- [ ] environment-specific configuration is separated and documented
-- [ ] health checks or readiness checks are available
-- [ ] backup strategy is documented for generated content and schedules if applicable
-- [ ] known limitations are explicitly documented
+- [ ] Persistent schedule records and job lifecycle controls.
+- [ ] Scheduler pause, resume, cancellation, and recovery after process restart.
+- [ ] Retry policy and defined behavior for provider/model outages.
+- [ ] Actual image/video analysis and content-aware generation.
+- [ ] Upload size and content validation beyond extension checks.
+
+## Security and operations
+
+- [ ] Authentication and authorization for any shared deployment.
+- [ ] CSRF protection and rate limiting for web routes.
+- [ ] Production WSGI/server and deployment configuration.
+- [ ] Secret-management and rotation guidance beyond local `.env`.
+- [ ] Health checks, structured application/scheduler logs, and monitoring.
+- [ ] CI workflow running the regression suite.
 
 ## Completion gate
-The project should only be treated as complete when all P0 and P1 items are resolved and critical user journeys have been validated end-to-end.
+
+Do not treat the application as production-ready until live provider behavior has been verified, web routes have test coverage, and the relevant deployment, security, and scheduler durability requirements are addressed.

@@ -1,65 +1,57 @@
 # Technical Audit
 
-## Architecture assessment
-The codebase follows a very small, direct architecture:
-- `app.py` handles CLI parsing
-- `social_media_agent/generator.py` implements generation logic and provider adapters
-- `social_media_agent/web.py` handles the Flask app and form processing
-- `social_media_agent/scheduler.py` runs periodic job loops
+## Architecture
 
-This is a straightforward monolithic design that matches the project’s scale. The issue is not architectural overengineering; it is that the architecture is too thin to support required operational features such as persistence, authentication, validation, or monitoring.
+The project is a small Python monolith:
 
-## Code quality findings
-### Strengths
-- clear file responsibilities
-- low complexity for a demo app
-- readable naming and simple CLI usage
-- no unnecessary framework churn
+- `app.py` provides CLI argument parsing.
+- `social_media_agent/generator.py` builds provider requests, parses responses, and implements local fallback.
+- `social_media_agent/web.py` handles Flask routes, form validation, and uploads.
+- `social_media_agent/scheduler.py` validates schedules and runs periodic generation/output loops.
+- `social_media_agent/templates/index.html` renders the web UI.
+- `tests/test_phase1_regressions.py` contains standard-library `unittest` regression coverage.
 
-### Weaknesses
-- missing validation gates for API keys and provider-specific requests
-- inconsistent external integration handling
-- no abstraction layer for persistence or jobs
-- no logging or structured error handling
-- no automated quality checks
-- generic fallback logic is used to mask deeper runtime issues
+This architecture remains appropriate for a local prototype. It does not provide durable background jobs or multi-user operation.
 
-## Security findings
-### P0 / Security concerns
-- API key usage is unguarded in runtime code paths and provider headers are not properly formed
-- no secret rotation strategy or secret management
-- no input sanitization beyond filename security in Flask uploads
-- no CSRF protection or session management (not necessary for a single-user local demo, but still a gap)
-- no rate limiting or abuse prevention for web interaction
-- debug mode is enabled in `web.py` (`app.run(debug=True, host="127.0.0.1", port=5000)`) which is not suitable for production use
+## Provider integration status
 
-## External integration quality
-The provider implementation is the weakest technical area:
-- OpenAI path is based on the deprecated ChatCompletion API
-- Hugging Face and Cohere code use a placeholder authorization header rather than the actual API key
-- error handling is minimal and does not check HTTP status codes or provider-specific payload shapes rigorously
-- there is no retry policy or timeout/backoff policy beyond a request timeout
+- **OpenAI:** Uses the current SDK `OpenAI` client and Chat Completions interface. Initialization and request failures are logged and fall back locally.
+- **Hugging Face:** Uses HTTP requests with Bearer authentication, status checks, and response/error-payload handling. The configured model must be supported by the available inference service.
+- **Cohere:** Uses the v2 Chat endpoint (`https://api.cohere.com/v2/chat`), Bearer authentication, user message payload, and JSON response format. The response parser reads text blocks from the v2 message.
+- Provider behavior is covered with mocks. No live calls with credentials have been made, so credentials, account permissions, endpoint availability, and model compatibility remain unverified.
 
-## Data and operational concerns
-- no persistence layer or database
-- no migration system
-- no audit trail for generated content
-- no success/failure metrics
-- no operational log structure
-- no health endpoint or ready check
+## Input and scheduling
 
-## Build and validation status
-### Static review result
-The project is comprehensible and the code is syntactically consistent with the intended design as reviewed.
+The CLI and web app validate required topics and allowed choices. Interval/count parsing is shared in `scheduler.py`; the scheduler also guards its direct-call arguments. Web upload checks are extension-based and user-visible errors are rendered as status messages.
 
-### Runtime verification status
-Verification was attempted, but a working Python runtime was not available in the execution environment. The environment’s advertised `python` entry point resolves to a Windows App Installer stub, not a usable Python interpreter. Because of that, automated runtime validation could not be executed here.
+Remaining gaps:
 
-### Test status
-No test inventory was found in the repository. There is no CI pipeline, lint configuration, or pre-commit quality gate.
+- No automated Flask test-client coverage for form submission and uploads.
+- `scheduled_output` is a filesystem path supplied by the user; deployment scenarios need explicit path constraints.
+- Scheduled work runs in a daemon thread and is not durable, inspectable, or recoverable across restarts.
 
-## Dependency maturity and maintenance
-The project depends on a small set of packages, but there is no dependency lockfile or policy for pinning versions. This increases the risk of runtime drift when dependencies update.
+## Reliability and observability
+
+Provider failures and API-level error responses are logged with fallback context. The app does not yet provide structured request/job identifiers, scheduler lifecycle logs, metrics, tracing, retries, or centralized error reporting.
+
+## Security and deployment
+
+- Flask debug mode is disabled and the development server binds to localhost.
+- API keys are read from environment variables or `.env`; a dedicated secret-management and rotation process is not included.
+- There is no authentication, authorization, CSRF protection, or rate limiting.
+- Upload checks rely on filename extensions, not content type inspection, malware scanning, or size limits.
+- No production WSGI deployment configuration, container image, CI/CD pipeline, or health/readiness endpoints are provided.
+
+## Build and verification status
+
+The Phase 1 regression suite runs with:
+
+```bash
+python -m unittest discover -s tests -v
+```
+
+The suite includes mocked provider success and failure cases, local fallback, and CLI/scheduler validation. Python compilation was also checked. Tests do not make real provider requests or exercise Flask routes. Live provider validation requires credentials and is outstanding.
 
 ## Overall technical assessment
-The project is technically understandable and light to operate, but it is not resilient, secure, or maintainable enough for production use. It should be treated as a prototype with several critical runtime defects in its integration layer.
+
+Phase 1 addresses the identified SDK, auth-header, response-failure, and basic input-validation defects. The implementation is more testable, but production resilience and security remain incomplete. Treat the app as a local prototype until provider smoke tests, web route tests, and deployment safeguards are in place.

@@ -2,38 +2,41 @@
 
 ## Issue inventory
 
-| ID | Severity | File(s) | Summary | Evidence |
+| ID | Severity | Status | File(s) | Summary / evidence |
 | --- | --- | --- | --- | --- |
-| ISS-001 | P0 | `social_media_agent/generator.py` | OpenAI path is using a deprecated SDK interface | `openai.ChatCompletion.create(...)` |
-| ISS-002 | P0 | `social_media_agent/generator.py` | Hugging Face and Cohere auth headers are invalid | `"Authorization": f"******"` |
-| ISS-003 | P0 | `social_media_agent/web.py`, `social_media_agent/scheduler.py` | invalid interval/input can break the app in production-like use | `parse_interval` raises `ValueError` and no catch is present |
-| ISS-004 | P1 | entire repo | no automated tests or CI pipeline | repository scan shows no tests/files |
-| ISS-005 | P1 | `social_media_agent/scheduler.py` | scheduler has no persistence or rescheduling state | while loop re-generates content without tracking status |
-| ISS-006 | P1 | no auth layer | no user or service authentication | no login, session, or token system |
-| ISS-007 | P1 | entire repo | no deployment or environment hardening | no Docker, no health checks, no production config |
-| ISS-008 | P2 | `social_media_agent/web.py` | file upload flow is superficial and not real media-aware | files are stored only for naming and not processed |
-| ISS-009 | P2 | entire repo | no operational logging or monitoring | no logs or metrics structures |
-| ISS-010 | P2 | `social_media_agent/web.py` | debug mode enabled in local app starter | `app.run(debug=True, ...)` |
+| ISS-001 | P0 | Implemented; mock-tested | `social_media_agent/generator.py` | OpenAI uses the current SDK client API. Live credentials have not been tested. |
+| ISS-002 | P0 | Implemented; mock-tested | `social_media_agent/generator.py` | Hugging Face and Cohere use Bearer authentication; Cohere was moved to v2 Chat. Live endpoint/model access remains unverified. |
+| ISS-003 | P0 | Implemented for core cases | `app.py`, `social_media_agent/web.py`, `social_media_agent/scheduler.py` | Topic, core choice, interval, and count validation is present. Flask route-level tests and comprehensive abuse validation remain outstanding. |
+| ISS-004 | P1 | Partially addressed | `tests/` | Standard-library regression tests exist and run locally; no CI workflow and no Flask route tests exist yet. |
+| ISS-005 | P1 | Open | `social_media_agent/scheduler.py` | Schedules run in process and have no persistent state, lifecycle controls, or restart recovery. |
+| ISS-006 | P1 | Open | Web application | No authentication or authorization. Intended for local use only. |
+| ISS-007 | P1 | Open | Project configuration | No production deployment configuration, health checks, or environment separation beyond `.env`. |
+| ISS-008 | P2 | Open | `social_media_agent/web.py` | Uploads are stored by extension-allowlist; their contents are not analyzed or scanned. |
+| ISS-009 | P2 | Partially addressed | `social_media_agent/generator.py` | Provider errors are logged, but structured operational logging, metrics, and monitoring are absent. |
+| ISS-010 | P2 | Implemented for local runner | `social_media_agent/web.py` | Debug mode is off and the development runner binds to localhost; this does not replace production server configuration. |
 
-## Risk evaluation
-### Critical risks
-- Contract-breaking AI provider calls prevent the advertised feature from functioning as intended.
-- Invalid user input can cause runtime exceptions that are not gracefully handled.
-- Feature claims about AI provider support are not currently trustworthy.
+## Remaining risks
 
-### High risks
-- no test suite means broken behavior is hard to detect
-- no storage layer means scheduled tasks are not recoverable
-- no deployment config means app cannot be produced safely for real use
+### Provider verification
 
-### Medium risks
-- file uploads are treated as simple filenames, not media assets
-- there is no observability or telemetry
-- debug mode is not suitable for live deployment exposure
+Mock tests validate request shape, auth header construction, parsing, and fallback behavior. They cannot verify real credentials, provider entitlements, endpoint availability, rate limits, or configured model access.
+
+### Scheduler lifecycle
+
+The scheduler is an in-process loop. It has no persistent queue or status store, and web schedules run in daemon threads that stop with the web process.
+
+### Web exposure and uploads
+
+The Flask app has no user authentication, CSRF protection, or rate limiting. Upload validation is extension-based and does not provide file-content verification, malware scanning, or size limits. Keep the web app local unless appropriate controls are added.
+
+### Operations
+
+Provider failures are logged, but operational visibility is limited. There is no structured scheduler history, monitoring, health endpoint, or deployment automation.
 
 ## Mitigation priorities
-1. repair provider SDK and auth logic
-2. add real validation and error handling around user workflows
-3. add automated test coverage for core generation logic
-4. add persistence and queueing for periodic jobs
-5. move from prototype to hardened runtime configuration
+
+1. Run credentialed provider smoke tests and document verified model configuration.
+2. Add Flask test-client coverage for valid and invalid submissions.
+3. Decide whether durable scheduling is in scope; add persistence and lifecycle controls if required.
+4. Add deployment, access control, CSRF/rate-limit, and upload safeguards before any shared exposure.
+5. Add CI and operational monitoring.
