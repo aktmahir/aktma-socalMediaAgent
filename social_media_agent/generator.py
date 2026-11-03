@@ -343,6 +343,7 @@ class SocialMediaPostGenerator:
                 "caption": caption,
                 "hashtags": hashtags,
                 "call_to_action": call_to_action,
+                "generation_source": "provider",
             }
         except Exception:
             return {
@@ -359,6 +360,7 @@ class SocialMediaPostGenerator:
                 "caption": text,
                 "hashtags": self._build_hashtags(topic, platform),
                 "call_to_action": "",
+                "generation_source": "provider",
             }
 
     def _generate_local(
@@ -433,6 +435,7 @@ class SocialMediaPostGenerator:
             "caption": caption,
             "hashtags": hashtags,
             "call_to_action": call_to_action,
+            "generation_source": "local",
         }
 
     def _build_hashtags(self, topic: str, platform: str = "") -> List[str]:

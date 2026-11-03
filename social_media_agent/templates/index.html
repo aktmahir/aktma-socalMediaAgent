@@ -16,6 +16,7 @@
       .status-message { padding: 14px; border-radius: 12px; }
       .status-error { background: #fef2f2; border: 1px solid #fecaca; color: #991b1b; }
       .status-success { background: #ecfdf5; border: 1px solid #d1fae5; color: #065f46; }
+      .status-warning { background: #fffbeb; border: 1px solid #fde68a; color: #92400e; }
       .result { margin-top: 24px; border-top: 1px solid #e5e7eb; padding-top: 24px; }
       .badge { display: inline-block; margin: 4px 6px 4px 0; padding: 8px 12px; background: #eef2ff; color: #3730a3; border-radius: 999px; font-size: 13px; }
     </style>
@@ -118,6 +119,11 @@
           {% endif %}
           {% if post.media_filename %}
           <p><strong>Media file</strong> {{ post.media_filename }}</p>
+          {% endif %}
+          {% if post.generation_source == 'local' %}
+          <p class="status-message status-warning" role="status" aria-live="polite">
+            Generated with the local template fallback; external provider output was not used.
+          </p>
           {% endif %}
           {% if post.title %}
           <p><strong>YouTube title</strong></p>

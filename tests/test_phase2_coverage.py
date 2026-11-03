@@ -235,6 +235,10 @@ class PhaseTwoCoverageTests(unittest.TestCase):
         response_text = response.get_data(as_text=True)
         self.assertIn("Generated Post", response_text)
         self.assertIn("AI marketing", response_text)
+        self.assertIn(
+            "Generated with the local template fallback; external provider output was not used.",
+            response_text,
+        )
 
     def test_web_upload_uses_unique_server_filename_and_checks_media_signature(self) -> None:
         generator = Mock()
@@ -1024,6 +1028,40 @@ class PhaseTwoCoverageTests(unittest.TestCase):
                 cli_module.main()
 
             self.assertIn("No scheduled jobs found.", output.getvalue())
+
+    def test_cli_identifies_local_fallback_in_generated_output(self) -> None:
+        generator = Mock()
+        generator.provider_model = "test-model"
+        generator.generate_post.return_value = {
+            "generation_source": "local",
+            "platform": "instagram",
+            "tone": "friendly",
+            "language": "English",
+            "topic": "AI marketing",
+            "media_type": "text",
+            "media_filename": None,
+            "title": "",
+            "description": "",
+            "tags": [],
+            "caption": "Local caption",
+            "hashtags": ["marketing"],
+            "call_to_action": "",
+        }
+        output = StringIO()
+        with patch.object(
+            sys,
+            "argv",
+            ["app.py", "--topic", "AI marketing"],
+        ), patch.object(
+            cli_module,
+            "SocialMediaPostGenerator",
+            return_value=generator,
+        ), redirect_stdout(output):
+            cli_module.main()
+
+        self.assertIn("Generation source: Local template fallback", output.getvalue())
+        self.assertNotIn("Provider: Openai", output.getvalue())
+        self.assertNotIn("Model: test-model", output.getvalue())
 
     def test_cli_retry_command_invokes_scheduler_retry(self) -> None:
         scheduler = Mock()

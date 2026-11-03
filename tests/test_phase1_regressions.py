@@ -31,6 +31,7 @@ class PhaseOneRegressionTests(unittest.TestCase):
             <= set(post)
         )
         self.assertEqual(post["platform"], "linkedin")
+        self.assertEqual(post["generation_source"], "local")
         self.assertTrue(post["caption"])
         self.assertTrue(post["hashtags"])
 
@@ -99,6 +100,7 @@ class PhaseOneRegressionTests(unittest.TestCase):
             post = generator.generate_post("topic")
 
         self.assertEqual(post["caption"], "mock caption")
+        self.assertEqual(post["generation_source"], "provider")
         client.chat.completions.create.assert_called_once()
 
     def test_openai_failure_is_logged_and_falls_back(self) -> None:
@@ -113,6 +115,7 @@ class PhaseOneRegressionTests(unittest.TestCase):
                 post = generator.generate_post("topic")
 
         self.assertTrue(post["caption"])
+        self.assertEqual(post["generation_source"], "local")
         self.assertIn("OpenAI generation failed", logs.output[0])
         self.assertIn("RuntimeError", logs.output[0])
         self.assertNotIn("private provider response", logs.output[0])
@@ -155,6 +158,7 @@ class PhaseOneRegressionTests(unittest.TestCase):
                     )
 
                 self.assertEqual(post["caption"], "mock caption")
+                self.assertEqual(post["generation_source"], "provider")
                 headers = requests_module.post.call_args.kwargs["headers"]
                 self.assertEqual(headers["Authorization"], "Bearer test-token")
                 if provider == "cohere":
@@ -191,6 +195,7 @@ class PhaseOneRegressionTests(unittest.TestCase):
                         )
 
                 self.assertTrue(post["caption"])
+                self.assertEqual(post["generation_source"], "local")
                 self.assertIn("using local generation", logs.output[0])
                 self.assertIn("RuntimeError", logs.output[0])
                 self.assertNotIn("private provider response", logs.output[0])
@@ -215,5 +220,6 @@ class PhaseOneRegressionTests(unittest.TestCase):
                         )
 
                 self.assertTrue(post["caption"])
+                self.assertEqual(post["generation_source"], "local")
                 self.assertIn("using local generation", logs.output[0])
                 self.assertNotIn("private provider detail", logs.output[0])

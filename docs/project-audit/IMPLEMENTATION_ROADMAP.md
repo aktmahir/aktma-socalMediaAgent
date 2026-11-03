@@ -69,7 +69,7 @@
 
 ### ROAD-09 — Web feedback and state
 - **Status:** Implemented for current local workflows.
-- **Description:** Validation feedback is announced accessibly as an assertive error; schedule-start feedback is styled and announced as a polite status. Scheduled job IDs link the UI to CLI lifecycle controls.
+- **Description:** Validation feedback is announced accessibly as an assertive error; schedule-start feedback is styled and announced as a polite status. Generated local-template fallback is labeled in the CLI and web result to distinguish it from provider output. Scheduled job IDs link the UI to CLI lifecycle controls.
 
 ## Phase 5 — Production Readiness
 

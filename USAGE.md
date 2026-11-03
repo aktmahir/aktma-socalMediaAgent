@@ -27,7 +27,7 @@ OPENAI_API_KEY=your_openai_api_key_here
 
 Hugging Face uses `HUGGINGFACE_API_KEY` and optionally `HUGGINGFACE_MODEL`. Cohere uses `COHERE_API_KEY` and optionally `COHERE_MODEL` (default: `command-a-03-2025`). The Cohere adapter uses the Cohere v2 Chat API. Choose the OpenAI model with `--openai-model`; `--provider-model` overrides the model for any selected provider. Do not commit real API keys.
 
-The app falls back to local generation when no provider key is configured or a provider request fails. Provider failures are logged. This fallback is useful for local development but does not confirm that an external provider is configured correctly.
+The app falls back to local generation when no provider key is configured or a provider request fails. Provider failures are logged. The CLI and web result identify local-template output so it is not mistaken for a response from the selected external provider. This fallback is useful for local development but does not confirm that an external provider is configured correctly.
 
 Optional: install the package to enable its console scripts:
 

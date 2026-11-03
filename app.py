@@ -216,8 +216,11 @@ def main() -> None:
     result = generator.generate_post(**post_config)
 
     print("\n=== Generated Social Media Post ===\n")
-    print(f"Provider: {args.ai_provider.title()}")
-    print(f"Model: {generator.provider_model}")
+    if result["generation_source"] == "provider":
+        print(f"Provider: {args.ai_provider.title()}")
+        print(f"Model: {generator.provider_model}")
+    else:
+        print("Generation source: Local template fallback")
     print(f"Platform: {result['platform'].title().replace('_', ' ')}")
     print(f"Tone: {result['tone'].title()}")
     print(f"Language: {result['language']}")
