@@ -30,7 +30,7 @@
 - **Description:** Expand regression coverage to the scheduler and generator and run it automatically.
 - **Modules:** `tests/`, CI configuration.
 - **Current state:** `unittest` regression tests cover provider mocks and failures, scheduler output/recovery/supervision, and Flask generation and schedule submissions. GitHub Actions runs the suite on pushes and pull requests across Python 3.10–3.12.
-- **Verified:** The 48-test suite passes locally; GitHub Actions passed all Python 3.10, 3.11, and 3.12 matrix jobs for commit `2310887`.
+- **Verified:** The 49-test suite passes locally; GitHub Actions passed all Python 3.10, 3.11, and 3.12 matrix jobs for commit `80d1215` (48 tests at that revision).
 - **Remaining:** Expand coverage as new features land.
 
 ### ROAD-05 — Persistent scheduling
@@ -73,8 +73,8 @@
 ## Phase 5 — Production Readiness
 
 ### ROAD-10 — Deployment and security hardening
-- **Status:** Not started.
-- **Description:** Add production server configuration, environment separation, health checks, and protections appropriate to the exposure model. Flask debug mode is disabled and the local runner binds to localhost, but this is not a production deployment setup.
+- **Status:** Partially implemented for local liveness only.
+- **Description:** `GET /health` reports that the Flask app is serving requests. It does not check provider credentials, database readiness, or scheduler workers. Production server configuration, environment separation, readiness checks, and protections appropriate to the exposure model remain outstanding. Flask debug mode is disabled and the local runner binds to localhost, but this is not a production deployment setup.
 
 ## Phase completion criteria
 

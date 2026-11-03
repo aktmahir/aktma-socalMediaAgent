@@ -114,6 +114,8 @@ The form validates the topic, supported select values, uploaded file extensions 
 
 For basic request monitoring, scrape `http://127.0.0.1:5000/metrics`. It returns Prometheus text-format request totals and duration histograms by bounded HTTP method and status code; the scrape endpoint itself is excluded. Metrics are held in memory and reset when the app restarts. Keep the web app bound to localhost, or protect the endpoint appropriately before exposing it beyond a trusted local environment.
 
+The `http://127.0.0.1:5000/health` endpoint returns `{"status":"ok"}` when the Flask application is serving requests. This is a liveness check only; it does not verify provider credentials, database readiness, or scheduler-worker availability, and is not a production readiness probe.
+
 ## 5. Uploads and media limitations
 
 The web form accepts image extensions `png`, `jpg`, `jpeg`, `gif` and video extensions `mp4`, `mov`, `avi`, `webm`, `m4v`. Each upload is limited to 5 MB and its initial file signature must match its extension and selected media type. Files are stored under random server-generated names in the repository's `uploads/` directory, so an uploaded name cannot overwrite another file or control its storage path. Invalid submissions are rejected before the upload is written. The app does not serve uploaded files, analyze their contents, or send file bytes to a vision model. Signature checks are not a full parser or malware scan; keep the web app local and do not treat these checks as protection for public uploads.

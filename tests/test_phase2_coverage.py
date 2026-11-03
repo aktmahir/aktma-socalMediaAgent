@@ -18,6 +18,13 @@ from social_media_agent.web import MAX_UPLOAD_BYTES, _has_matching_signature, cr
 
 
 class PhaseTwoCoverageTests(unittest.TestCase):
+    def test_health_route_reports_application_liveness(self) -> None:
+        with patch("social_media_agent.web.SocialMediaPostGenerator", return_value=Mock()):
+            response = create_app().test_client().get("/health")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json(), {"status": "ok"})
+
     def test_metrics_route_reports_request_count_and_latency_without_scrape_counts(self) -> None:
         with patch("social_media_agent.web.SocialMediaPostGenerator", return_value=Mock()):
             app = create_app()

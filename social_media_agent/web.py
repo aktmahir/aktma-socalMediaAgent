@@ -6,7 +6,7 @@ import time
 import uuid
 from pathlib import Path
 
-from flask import Flask, Response, g, render_template, request
+from flask import Flask, Response, g, jsonify, render_template, request
 from werkzeug.datastructures import FileStorage
 from werkzeug.exceptions import RequestEntityTooLarge
 from werkzeug.utils import secure_filename
@@ -172,6 +172,10 @@ def create_app() -> Flask:
             request_metrics.render_prometheus(),
             content_type="text/plain; version=0.0.4; charset=utf-8",
         )
+
+    @app.get("/health")
+    def health() -> Response:
+        return jsonify(status="ok")
 
     @app.errorhandler(RequestEntityTooLarge)
     def handle_request_too_large(_error: RequestEntityTooLarge):

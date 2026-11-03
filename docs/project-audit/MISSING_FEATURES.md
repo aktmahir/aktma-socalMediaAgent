@@ -7,10 +7,10 @@
 | MF-001 | OpenAI SDK compatibility | Implemented; mock-tested | P0 | Current OpenAI client path is used; live access remains unverified. |
 | MF-002 | Hugging Face/Cohere authentication and request handling | Implemented; mock-tested | P0 | Bearer auth and fallback behavior are tested; real provider/model availability is not. |
 | MF-003 | Core input and schedule validation | Implemented; tested | P0 | CLI, scheduler, and Flask test-client tests cover core invalid inputs and valid generation. |
-| MF-004 | Automated tests and CI | Implemented; locally and remotely verified | P1 | 48 `unittest` regression cases cover scheduler lifecycle, Flask routes, request metrics, and provider mocks; GitHub Actions passed for Python 3.10–3.12 on commit `2310887`. |
+| MF-004 | Automated tests and CI | Implemented; locally and remotely verified | P1 | 49 `unittest` regression cases cover scheduler lifecycle, Flask routes, request metrics, health liveness, and provider mocks; GitHub Actions passed for Python 3.10–3.12 on commit `80d1215` (48 tests at that revision). |
 | MF-005 | Persistent schedule state | Implemented for local use | P1 | SQLite records jobs and generated outputs; CLI supports listing, pause/resume/cancel, manual recovery, an opt-in supervisor, leases, and three-attempt retries for unexpected generator exceptions. Automatic supervisor startup remains missing. |
 | MF-006 | Authentication and authorization | Missing | P1 | Keep deployment local until access control is added. |
-| MF-007 | Production deployment configuration | Missing | P1 | No production WSGI, health checks, or deploy pipeline. |
+| MF-007 | Production deployment configuration | Missing | P1 | No production WSGI, readiness checks, or deploy pipeline. A local `/health` liveness endpoint does not establish production readiness. |
 | MF-008 | Actual media analysis | Missing | P2 | Upload name is prompt context; file contents are not processed. |
 | MF-009 | Operational logging and monitoring | Partial | P2 | Provider failures and JSON request/job lifecycle context are logged; `/metrics` exposes in-process request counts/latency; persistent metrics, centralized exception reporting, retention, and monitoring remain absent. |
 | MF-010 | Operational security hardening | Missing | P1 | No CSRF protection, rate limiting, secret-management service, or malware scanning. |

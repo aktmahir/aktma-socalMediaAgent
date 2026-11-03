@@ -10,7 +10,7 @@
 | ISS-004 | P1 | Implemented; locally verified | `tests/`, `.github/workflows/python-tests.yml` | Standard-library regression tests cover provider behavior, scheduler persistence/output, and Flask routes; CI is configured for pushes and pull requests. |
 | ISS-005 | P1 | Partially addressed | `social_media_agent/scheduler.py`, `app.py` | SQLite job records, CLI lifecycle controls, per-job expiring worker leases, bounded retries for unexpected generator exceptions, explicit retry of terminal failures, and an opt-in CLI supervisor are implemented. The supervisor must be launched separately for unattended recovery. |
 | ISS-006 | P1 | Open | Web application | No authentication or authorization. Intended for local use only. |
-| ISS-007 | P1 | Open | Project configuration | No production deployment configuration, health checks, or environment separation beyond `.env`. |
+| ISS-007 | P1 | Partially addressed | Project configuration | `GET /health` checks application liveness only; no production deployment configuration, readiness checks, or environment separation beyond `.env`. |
 | ISS-008 | P2 | Partially addressed | `social_media_agent/web.py` | Uploads have a 5 MB cap, allowlisted extensions/signatures, media-type consistency checks, and random server-generated names. Full media parsing, malware scanning, and content analysis remain absent. |
 | ISS-009 | P2 | Partially addressed | `social_media_agent/generator.py`, `social_media_agent/web.py`, `social_media_agent/scheduler.py` | Provider errors, JSON request/job lifecycle logs, and in-process Prometheus request metrics are available; centralized exception reporting, log retention, persistent metrics, and monitoring remain absent. |
 | ISS-010 | P2 | Implemented for local runner | `social_media_agent/web.py` | Debug mode is off and the development runner binds to localhost; this does not replace production server configuration. |
@@ -31,7 +31,7 @@ The Flask app has no user authentication, CSRF protection, or rate limiting. Upl
 
 ### Operations
 
-Provider failures and JSON-formatted request/job events are logged at INFO by CLI/web entry points. An in-process `/metrics` endpoint exposes request totals and latency histograms; counters reset on restart. Operational visibility remains limited: centralized exception reporting, log retention, monitoring, health endpoint, and deployment automation are absent.
+Provider failures and JSON-formatted request/job events are logged at INFO by CLI/web entry points. An in-process `/metrics` endpoint exposes request totals and latency histograms; counters reset on restart. `/health` confirms only that the Flask app can serve a request. Operational visibility remains limited: centralized exception reporting, log retention, monitoring, readiness checks, and deployment automation are absent.
 
 ## Mitigation priorities
 
