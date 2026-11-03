@@ -502,9 +502,19 @@ class PeriodicPostScheduler:
             if "already has an active worker" in str(exc):
                 logger.debug("Another supervisor owns scheduled job %s.", job_id)
             else:
-                logger.exception("Could not run scheduled job %s.", job_id)
-        except Exception:
-            logger.exception("Supervised scheduled job %s stopped unexpectedly.", job_id)
+                log_event(
+                    logger,
+                    "scheduler.supervised_worker_rejected",
+                    job_id=job_id,
+                    error_type=type(exc).__name__,
+                )
+        except Exception as exc:
+            log_event(
+                logger,
+                "scheduler.supervised_worker_failed",
+                job_id=job_id,
+                error_type=type(exc).__name__,
+            )
         finally:
             with self._supervisor_lock:
                 if self._supervisor_workers.get(job_id) is threading.current_thread():
@@ -575,7 +585,12 @@ class PeriodicPostScheduler:
                     return
             except sqlite3.Error as exc:
                 errors.append(exc)
-                logger.exception("Could not renew scheduler worker lease for job %s.", job_id)
+                log_event(
+                    logger,
+                    "scheduler.worker_lease_renewal_failed",
+                    job_id=job_id,
+                    error_type=type(exc).__name__,
+                )
                 return
             finally:
                 if connection is not None:

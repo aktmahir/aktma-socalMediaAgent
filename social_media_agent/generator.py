@@ -91,9 +91,8 @@ class SocialMediaPostGenerator:
                 self._openai_client = openai.OpenAI(api_key=self.api_key)
             except Exception as exc:
                 logger.warning(
-                    "Could not initialize the OpenAI client; using local generation: %s: %s",
+                    "Could not initialize the OpenAI client; using local generation (error type: %s).",
                     type(exc).__name__,
-                    exc,
                 )
                 self.use_openai = False
 
@@ -190,9 +189,8 @@ class SocialMediaPostGenerator:
             content = (response.choices[0].message.content or "").strip()
         except Exception as exc:
             logger.warning(
-                "OpenAI generation failed; using local generation: %s: %s",
+                "OpenAI generation failed; using local generation (error type: %s).",
                 type(exc).__name__,
-                exc,
             )
             return self._generate_local(topic, platform, tone, length, language, media_type, media_filename)
 
@@ -223,9 +221,8 @@ class SocialMediaPostGenerator:
             data = response.json()
         except Exception as exc:
             logger.warning(
-                "Hugging Face generation failed; using local generation: %s: %s",
+                "Hugging Face generation failed; using local generation (error type: %s).",
                 type(exc).__name__,
-                exc,
             )
             return self._generate_local(topic, platform, tone, length, language, media_type, media_filename)
 
@@ -235,8 +232,7 @@ class SocialMediaPostGenerator:
             content = str(data.get("generated_text", "")).strip()
             if not content and data.get("error"):
                 logger.warning(
-                    "Hugging Face returned an error; using local generation: %s",
-                    data["error"],
+                    "Hugging Face returned an error; using local generation."
                 )
                 return self._generate_local(topic, platform, tone, length, language, media_type, media_filename)
         else:
@@ -279,9 +275,8 @@ class SocialMediaPostGenerator:
             data = response.json()
         except Exception as exc:
             logger.warning(
-                "Cohere generation failed; using local generation: %s: %s",
+                "Cohere generation failed; using local generation (error type: %s).",
                 type(exc).__name__,
-                exc,
             )
             return self._generate_local(topic, platform, tone, length, language, media_type, media_filename)
 
@@ -296,16 +291,13 @@ class SocialMediaPostGenerator:
                     if isinstance(part, dict) and part.get("type") == "text" and part.get("text")
                 ).strip()
         elif isinstance(data, dict):
-            error = data.get("message") or data.get("error")
             logger.warning(
-                "Cohere returned an error response; using local generation: %s",
-                error or "response did not contain generated text",
+                "Cohere returned an error response; using local generation."
             )
             return self._generate_local(topic, platform, tone, length, language, media_type, media_filename)
         if not content:
             logger.warning(
-                "Cohere returned no generated text; using local generation (finish reason: %s).",
-                data.get("finish_reason", "unknown") if isinstance(data, dict) else "unknown",
+                "Cohere returned no generated text; using local generation."
             )
             return self._generate_local(topic, platform, tone, length, language, media_type, media_filename)
         return self._parse_json_response(content, topic, platform, tone, length, language, media_type, media_filename)

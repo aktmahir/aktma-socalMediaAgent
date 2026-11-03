@@ -103,7 +103,7 @@ class PhaseOneRegressionTests(unittest.TestCase):
 
     def test_openai_failure_is_logged_and_falls_back(self) -> None:
         client = Mock()
-        client.chat.completions.create.side_effect = RuntimeError("provider unavailable")
+        client.chat.completions.create.side_effect = RuntimeError("private provider response")
         openai_module = Mock()
         openai_module.OpenAI.return_value = client
 
@@ -114,7 +114,8 @@ class PhaseOneRegressionTests(unittest.TestCase):
 
         self.assertTrue(post["caption"])
         self.assertIn("OpenAI generation failed", logs.output[0])
-        self.assertIn("provider unavailable", logs.output[0])
+        self.assertIn("RuntimeError", logs.output[0])
+        self.assertNotIn("private provider response", logs.output[0])
 
     def test_huggingface_and_cohere_use_bearer_token(self) -> None:
         provider_cases = (
@@ -178,7 +179,7 @@ class PhaseOneRegressionTests(unittest.TestCase):
         ):
             with self.subTest(provider=provider):
                 requests_module = Mock()
-                requests_module.post.side_effect = RuntimeError("provider unavailable")
+                requests_module.post.side_effect = RuntimeError("private provider response")
                 with patch.object(generator_module, "requests", requests_module):
                     generator = SocialMediaPostGenerator(
                         api_key="test-token",
@@ -191,12 +192,13 @@ class PhaseOneRegressionTests(unittest.TestCase):
 
                 self.assertTrue(post["caption"])
                 self.assertIn("using local generation", logs.output[0])
-                self.assertIn("provider unavailable", logs.output[0])
+                self.assertIn("RuntimeError", logs.output[0])
+                self.assertNotIn("private provider response", logs.output[0])
 
     def test_provider_error_payload_falls_back_and_is_logged(self) -> None:
         provider_cases = (
-            ("huggingface", "_generate_huggingface", {"error": "model is loading"}),
-            ("cohere", "_generate_cohere", {"message": "model unavailable"}),
+            ("huggingface", "_generate_huggingface", {"error": "private provider detail"}),
+            ("cohere", "_generate_cohere", {"message": "private provider detail"}),
         )
         for provider, method_name, response_payload in provider_cases:
             with self.subTest(provider=provider):
@@ -214,4 +216,4 @@ class PhaseOneRegressionTests(unittest.TestCase):
 
                 self.assertTrue(post["caption"])
                 self.assertIn("using local generation", logs.output[0])
-                self.assertIn(response_payload.get("error", response_payload.get("message")), logs.output[0])
+                self.assertNotIn("private provider detail", logs.output[0])
