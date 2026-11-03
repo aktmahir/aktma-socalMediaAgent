@@ -112,6 +112,8 @@ Open `http://127.0.0.1:5000`. The app listens on localhost and starts with Flask
 
 The form validates the topic, supported select values, uploaded file extensions and signatures, schedule interval, and post count. Uploads are limited to 5 MB each. Scheduling creates a SQLite job and starts a background thread in the current process; closing the process stops that worker but preserves its job record for CLI recovery. A status message includes the job ID for validation or scheduler feedback.
 
+For basic request monitoring, scrape `http://127.0.0.1:5000/metrics`. It returns Prometheus text-format request totals and duration histograms by bounded HTTP method and status code; the scrape endpoint itself is excluded. Metrics are held in memory and reset when the app restarts. Keep the web app bound to localhost, or protect the endpoint appropriately before exposing it beyond a trusted local environment.
+
 ## 5. Uploads and media limitations
 
 The web form accepts image extensions `png`, `jpg`, `jpeg`, `gif` and video extensions `mp4`, `mov`, `avi`, `webm`, `m4v`. Each upload is limited to 5 MB and its initial file signature must match its extension and selected media type. Files are stored under random server-generated names in the repository's `uploads/` directory, so an uploaded name cannot overwrite another file or control its storage path. Invalid submissions are rejected before the upload is written. The app does not serve uploaded files, analyze their contents, or send file bytes to a vision model. Signature checks are not a full parser or malware scan; keep the web app local and do not treat these checks as protection for public uploads.
@@ -128,7 +130,7 @@ Tests use mocks for provider requests and do not call external provider APIs. Li
 
 ## Troubleshooting
 
-- CLI and web entry points emit timestamped logs to stderr. Web request and scheduler lifecycle records use JSON messages with request/job IDs and status information; prompt text, credentials, and upload contents are not included in those structured records.
+- CLI and web entry points emit timestamped logs to stderr. Web request and scheduler lifecycle records use JSON messages with request/job IDs and status information; prompt text, credentials, and upload contents are not included in those structured records. Request metrics are available at `/metrics`; they contain no routes, request IDs, prompts, filenames, or upload contents.
 - Confirm the virtual environment is active and dependencies are installed.
 - Confirm `AI_PROVIDER` and the selected provider's API key are set if AI-provider generation is expected.
 - A provider request failure is logged and returns a local fallback post; inspect application logs when diagnosing provider connectivity, authentication, or model errors.

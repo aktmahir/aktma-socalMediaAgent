@@ -12,11 +12,76 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 
 import app as cli_module
+from social_media_agent.observability import RequestMetrics
 from social_media_agent.scheduler import PeriodicPostScheduler
 from social_media_agent.web import MAX_UPLOAD_BYTES, _has_matching_signature, create_app
 
 
 class PhaseTwoCoverageTests(unittest.TestCase):
+    def test_metrics_route_reports_request_count_and_latency_without_scrape_counts(self) -> None:
+        with patch("social_media_agent.web.SocialMediaPostGenerator", return_value=Mock()):
+            app = create_app()
+            client = app.test_client()
+            client.get("/")
+            client.post("/", data={"topic": ""})
+
+            first_metrics_response = client.get("/metrics")
+            first_metrics = first_metrics_response.get_data(as_text=True)
+            second_metrics = client.get("/metrics").get_data(as_text=True)
+
+        self.assertEqual(first_metrics_response.status_code, 200)
+        self.assertTrue(
+            first_metrics_response.content_type.startswith("text/plain"),
+            first_metrics_response.content_type,
+        )
+        self.assertIn(
+            'social_media_agent_http_requests_total{method="GET",status_code="200"} 1',
+            first_metrics,
+        )
+        self.assertIn(
+            'social_media_agent_http_requests_total{method="POST",status_code="200"} 1',
+            first_metrics,
+        )
+        self.assertIn(
+            'social_media_agent_http_request_duration_seconds_count{method="GET",status_code="200"} 1',
+            first_metrics,
+        )
+        self.assertIn(
+            'social_media_agent_http_request_duration_seconds_bucket{method="GET",status_code="200",le="+Inf"} 1',
+            first_metrics,
+        )
+        self.assertEqual(first_metrics, second_metrics)
+        self.assertNotIn("/metrics", first_metrics)
+        self.assertNotIn("topic", first_metrics)
+
+    def test_metrics_normalize_unrecognized_methods_to_bound_label(self) -> None:
+        metrics = RequestMetrics()
+        metrics.observe_request("CUSTOM-UNTRUSTED-METHOD", 200, 0.02)
+
+        output = metrics.render_prometheus()
+
+        self.assertIn('method="OTHER",status_code="200"', output)
+        self.assertNotIn("CUSTOM-UNTRUSTED-METHOD", output)
+
+    def test_metrics_histogram_buckets_are_cumulative(self) -> None:
+        metrics = RequestMetrics()
+        metrics.observe_request("GET", 200, 0.02)
+
+        output = metrics.render_prometheus()
+
+        self.assertIn(
+            'social_media_agent_http_request_duration_seconds_bucket{method="GET",status_code="200",le="0.01"} 0',
+            output,
+        )
+        self.assertIn(
+            'social_media_agent_http_request_duration_seconds_bucket{method="GET",status_code="200",le="0.025"} 1',
+            output,
+        )
+        self.assertIn(
+            'social_media_agent_http_request_duration_seconds_sum{method="GET",status_code="200"} 0.020000',
+            output,
+        )
+
     def test_web_logs_request_id_and_status_without_logging_form_content(self) -> None:
         with patch("social_media_agent.web.SocialMediaPostGenerator", return_value=Mock()):
             app = create_app()

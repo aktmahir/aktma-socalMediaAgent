@@ -6,13 +6,13 @@ import time
 import uuid
 from pathlib import Path
 
-from flask import Flask, g, render_template, request
+from flask import Flask, Response, g, render_template, request
 from werkzeug.datastructures import FileStorage
 from werkzeug.exceptions import RequestEntityTooLarge
 from werkzeug.utils import secure_filename
 
 from .generator import SocialMediaPostGenerator
-from .observability import configure_logging, log_event
+from .observability import RequestMetrics, configure_logging, log_event
 from .scheduler import PeriodicPostScheduler, parse_count, parse_interval
 
 logger = logging.getLogger(__name__)
@@ -122,6 +122,7 @@ def create_app() -> Flask:
     app.config["MAX_CONTENT_LENGTH"] = MAX_REQUEST_BYTES
     UPLOAD_FOLDER.mkdir(parents=True, exist_ok=True)
     generator = SocialMediaPostGenerator()
+    request_metrics = RequestMetrics()
 
     def default_form_values():
         return {
@@ -148,16 +149,29 @@ def create_app() -> Flask:
         if request_id is not None:
             response.headers["X-Request-ID"] = request_id
             duration_ms = round((time.perf_counter() - g.request_started_at) * 1000, 2)
-            log_event(
-                logger,
-                "http.request",
-                request_id=request_id,
-                method=request.method,
-                path=request.path,
-                status_code=response.status_code,
-                duration_ms=duration_ms,
-            )
+            if request.path != "/metrics":
+                request_metrics.observe_request(
+                    request.method,
+                    response.status_code,
+                    duration_ms / 1000,
+                )
+                log_event(
+                    logger,
+                    "http.request",
+                    request_id=request_id,
+                    method=request.method,
+                    path=request.path,
+                    status_code=response.status_code,
+                    duration_ms=duration_ms,
+                )
         return response
+
+    @app.get("/metrics")
+    def metrics() -> Response:
+        return Response(
+            request_metrics.render_prometheus(),
+            content_type="text/plain; version=0.0.4; charset=utf-8",
+        )
 
     @app.errorhandler(RequestEntityTooLarge)
     def handle_request_too_large(_error: RequestEntityTooLarge):

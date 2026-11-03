@@ -30,7 +30,7 @@
 - **Description:** Expand regression coverage to the scheduler and generator and run it automatically.
 - **Modules:** `tests/`, CI configuration.
 - **Current state:** `unittest` regression tests cover provider mocks and failures, scheduler output/recovery/supervision, and Flask generation and schedule submissions. GitHub Actions runs the suite on pushes and pull requests across Python 3.10–3.12.
-- **Verified:** GitHub Actions run 1 passed all Python 3.10, 3.11, and 3.12 matrix jobs for commit `20607d3`.
+- **Verified:** The 48-test suite passes locally; GitHub Actions passed all Python 3.10, 3.11, and 3.12 matrix jobs for commit `2310887`.
 - **Remaining:** Expand coverage as new features land.
 
 ### ROAD-05 — Persistent scheduling
@@ -61,8 +61,8 @@
 
 ### ROAD-08 — Operational logging and monitoring
 - **Status:** Partially implemented.
-- **Description:** Web requests and scheduler lifecycle events emit JSON log records with request/job IDs, status, duration, and safe error types; CLI/web entry points enable INFO logging. Prompts, credentials, file names, and output paths are excluded from these structured records.
-- **Remaining:** Metrics, centralized exception reporting, log retention/rotation, and production log-sink configuration are not implemented.
+- **Description:** Web requests and scheduler lifecycle events emit JSON log records with request/job IDs, status, duration, and safe error types; CLI/web entry points enable INFO logging. `GET /metrics` exposes dependency-free Prometheus request counters and duration histograms with bounded method/status labels. Prompts, credentials, file names, and output paths are excluded from structured logs and metrics.
+- **Remaining:** Centralized exception reporting, log retention/rotation, persistent metrics, and production log-sink configuration are not implemented. Metrics are in-process and reset when the web app restarts.
 
 ## Phase 4 — UX and Product Completeness
 

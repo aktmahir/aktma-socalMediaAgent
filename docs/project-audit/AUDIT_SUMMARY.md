@@ -16,10 +16,10 @@ The project is a local Python prototype for generating social media content. It 
 
 | Roadmap task | Status | Current evidence |
 | --- | --- | --- |
-| ROAD-04: Automated tests and CI | Implemented; locally and remotely verified | 45 `unittest` cases pass locally; GitHub Actions run 1 passed its 34-test suite on Python 3.10, 3.11, and 3.12 for commit `20607d3`. |
+| ROAD-04: Automated tests and CI | Implemented; locally and remotely verified | 48 `unittest` cases pass locally; GitHub Actions run 3 passed on Python 3.10, 3.11, and 3.12 for commit `2310887`. |
 | ROAD-05: Persistent scheduling | Implemented for local use | SQLite persists jobs, retry attempts, and generated payloads; CLI supports inspection, pause/resume/cancel, manual recovery through `--run-scheduled JOB_ID`, and expiring leases to prevent concurrent workers. |
 
-The regression suite covers provider success/failure paths, local fallback, schedule parsing, job state persistence/recovery, output files, Flask generation/scheduling/upload validation, structured request and scheduler logs, supervisor recovery/concurrency limits, and CLI errors. Tests do not make live network calls. [The GitHub Actions run for commit `20607d3` passed all three Python matrix jobs](https://github.com/aktmahir/aktma-socalMediaAgent/actions/runs/41684526182).
+The regression suite covers provider success/failure paths, local fallback, schedule parsing, job state persistence/recovery, output files, Flask generation/scheduling/upload validation, request metrics and structured logs, supervisor recovery/concurrency limits, and CLI errors. Tests do not make live network calls. [The GitHub Actions run for commit `2310887` passed all three Python matrix jobs](https://github.com/aktmahir/aktma-socalMediaAgent/actions/runs/41708894458).
 
 ## Remaining risks and limitations
 
@@ -32,7 +32,7 @@ The regression suite covers provider success/failure paths, local fallback, sche
 - Failed jobs can be retried explicitly with `--retry-job JOB_ID`; the command refuses jobs that are not failed.
 - Web uploads are limited to 5 MB and checked against allowlisted extensions, initial file signatures, and selected media type; random server names prevent path control and accidental overwrite. Files are not analyzed, fully parsed, or malware-scanned.
 - No authentication, CSRF protection, rate limiting, or production deployment pipeline is provided.
-- JSON request/job lifecycle logs are emitted at INFO by CLI/web entry points, but metrics, centralized exception reporting, log retention, and production log-sink configuration are not implemented.
+- JSON request/job lifecycle logs are emitted at INFO by CLI/web entry points. `GET /metrics` exposes in-process request counters and duration histograms, but metrics reset on restart; centralized exception reporting, log retention, and production log-sink configuration are not implemented.
 
 ## Recommended next steps
 

@@ -12,7 +12,7 @@
 | ISS-006 | P1 | Open | Web application | No authentication or authorization. Intended for local use only. |
 | ISS-007 | P1 | Open | Project configuration | No production deployment configuration, health checks, or environment separation beyond `.env`. |
 | ISS-008 | P2 | Partially addressed | `social_media_agent/web.py` | Uploads have a 5 MB cap, allowlisted extensions/signatures, media-type consistency checks, and random server-generated names. Full media parsing, malware scanning, and content analysis remain absent. |
-| ISS-009 | P2 | Partially addressed | `social_media_agent/generator.py`, `social_media_agent/web.py`, `social_media_agent/scheduler.py` | Provider errors plus JSON request/job lifecycle logs are available; metrics, centralized exception reporting, log retention, and monitoring remain absent. |
+| ISS-009 | P2 | Partially addressed | `social_media_agent/generator.py`, `social_media_agent/web.py`, `social_media_agent/scheduler.py` | Provider errors, JSON request/job lifecycle logs, and in-process Prometheus request metrics are available; centralized exception reporting, log retention, persistent metrics, and monitoring remain absent. |
 | ISS-010 | P2 | Implemented for local runner | `social_media_agent/web.py` | Debug mode is off and the development runner binds to localhost; this does not replace production server configuration. |
 
 ## Remaining risks
@@ -31,12 +31,12 @@ The Flask app has no user authentication, CSRF protection, or rate limiting. Upl
 
 ### Operations
 
-Provider failures and JSON-formatted request/job events are logged at INFO by CLI/web entry points. Operational visibility remains limited: metrics, centralized exception reporting, log retention, monitoring, health endpoint, and deployment automation are absent.
+Provider failures and JSON-formatted request/job events are logged at INFO by CLI/web entry points. An in-process `/metrics` endpoint exposes request totals and latency histograms; counters reset on restart. Operational visibility remains limited: centralized exception reporting, log retention, monitoring, health endpoint, and deployment automation are absent.
 
 ## Mitigation priorities
 
 1. Run credentialed provider smoke tests and document verified model configuration.
-2. Keep route/scheduler regression coverage current; the Python 3.10–3.12 GitHub Actions matrix passed for commit `20607d3`.
+2. Keep route/scheduler regression coverage current; the Python 3.10–3.12 GitHub Actions matrix passed for commit `2310887`.
 3. Configure the opt-in supervisor as an operating-system service/task if unattended recovery is required, and define provider outage behavior.
 4. Add deployment, access control, CSRF/rate-limit, and malware-scanning safeguards before any shared exposure.
-5. Add operational metrics, centralized exception reporting, log retention, and monitoring.
+5. Extend operational metrics with persistence and alerting; add centralized exception reporting, log retention, and monitoring.
