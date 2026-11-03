@@ -19,10 +19,12 @@ def allowed_file(filename: str) -> bool:
 
 
 def parse_interval(interval: str) -> int:
-    if not interval:
+    if not interval or not interval.strip():
         return 0
     unit = interval[-1].lower()
     amount = int(interval[:-1])
+    if amount <= 0:
+        raise ValueError("Interval must be a positive integer value.")
     if unit == "s":
         return amount
     if unit == "m":
@@ -65,8 +67,16 @@ def create_app() -> Flask:
             values["length"] = request.form.get("length", "medium")
             values["language"] = request.form.get("language", "English")
             values["interval"] = request.form.get("interval", "").strip()
-            values["count"] = int(request.form.get("count", "0") or 0)
             values["scheduled_output"] = request.form.get("scheduled_output", "scheduled_posts").strip() or "scheduled_posts"
+
+            count_value = (request.form.get("count", "0") or "0").strip()
+            try:
+                values["count"] = int(count_value)
+                if values["count"] < 0:
+                    raise ValueError
+            except ValueError:
+                values["count"] = 0
+                status_message = "Scheduled post count must be a non-negative integer."
 
             media_file = request.files.get("media_file")
             if media_file and media_file.filename:
@@ -75,6 +85,8 @@ def create_app() -> Flask:
                     file_path = app.config["UPLOAD_FOLDER"] / filename
                     media_file.save(file_path)
                     values["media_filename"] = filename
+                else:
+                    status_message = "Unsupported media file type. Allowed types: images and common video files."
 
             post_config = {
                 "topic": values["topic"],
@@ -87,19 +99,23 @@ def create_app() -> Flask:
             }
 
             if values["topic"] and values["interval"]:
-                interval_seconds = parse_interval(values["interval"])
-                scheduler = PeriodicPostScheduler(generator, output_dir=values["scheduled_output"])
-                thread = threading.Thread(
-                    target=scheduler.schedule,
-                    kwargs={"post_config": post_config, "interval_seconds": interval_seconds, "count": values["count"]},
-                    daemon=True,
-                )
-                thread.start()
-                status_message = (
-                    f"Scheduled posting started every {values['interval']}. "
-                    f"Saved output to {values['scheduled_output']}/"
-                )
-            elif values["topic"]:
+                try:
+                    interval_seconds = parse_interval(values["interval"])
+                except ValueError as exc:
+                    status_message = str(exc)
+                else:
+                    scheduler = PeriodicPostScheduler(generator, output_dir=values["scheduled_output"])
+                    thread = threading.Thread(
+                        target=scheduler.schedule,
+                        kwargs={"post_config": post_config, "interval_seconds": interval_seconds, "count": values["count"]},
+                        daemon=True,
+                    )
+                    thread.start()
+                    status_message = (
+                        f"Scheduled posting started every {values['interval']}. "
+                        f"Saved output to {values['scheduled_output']}/"
+                    )
+            elif values["topic"] and not status_message:
                 post = generator.generate_post(**post_config)
 
         return render_template(
@@ -119,4 +135,4 @@ def create_app() -> Flask:
 
 def main() -> None:
     app = create_app()
-    app.run(debug=True, host="127.0.0.1", port=5000)
+    app.run(debug=False, host="127.0.0.1", port=5000)

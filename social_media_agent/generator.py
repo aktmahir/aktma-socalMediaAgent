@@ -75,13 +75,23 @@ class SocialMediaPostGenerator:
 
         self.provider_model = provider_model or self._load_provider_model(self.provider, openai_model)
         self.api_key = api_key or self._load_api_key_for_provider(self.provider)
+        self._openai_client = None
 
         self.use_openai = self.provider == "openai" and bool(self.api_key) and openai is not None
         self.use_huggingface = self.provider == "huggingface" and bool(self.api_key) and requests is not None
         self.use_cohere = self.provider == "cohere" and bool(self.api_key) and requests is not None
 
         if self.use_openai:
-            openai.api_key = self.api_key
+            try:
+                if hasattr(openai, "OpenAI"):
+                    self._openai_client = openai.OpenAI(api_key=self.api_key)
+                else:
+                    openai.api_key = self.api_key
+            except Exception:
+                try:
+                    openai.api_key = self.api_key
+                except Exception:
+                    self.use_openai = False
 
     def _load_api_key_for_provider(self, provider: str) -> Optional[str]:
         if provider == "openai":
@@ -160,13 +170,30 @@ class SocialMediaPostGenerator:
         media_filename: Optional[str],
     ) -> Dict[str, object]:
         prompt = self._build_prompt(topic, platform, tone, length, language, media_type, media_filename)
-        response = openai.ChatCompletion.create(
-            model=self.provider_model,
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.85,
-            max_tokens=400,
-        )
-        content = response.choices[0].message.content.strip()
+
+        try:
+            if self._openai_client is not None:
+                response = self._openai_client.chat.completions.create(
+                    model=self.provider_model,
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=0.85,
+                    max_tokens=400,
+                )
+                content = (response.choices[0].message.content or "").strip()
+            elif openai is not None and hasattr(openai, "ChatCompletion"):
+                openai.api_key = self.api_key
+                response = openai.ChatCompletion.create(
+                    model=self.provider_model,
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=0.85,
+                    max_tokens=400,
+                )
+                content = (response.choices[0].message.content or "").strip()
+            else:
+                return self._generate_local(topic, platform, tone, length, language, media_type, media_filename)
+        except Exception:
+            return self._generate_local(topic, platform, tone, length, language, media_type, media_filename)
+
         return self._parse_json_response(content, topic, platform, tone, length, language, media_type, media_filename)
 
     def _generate_huggingface(
@@ -183,17 +210,22 @@ class SocialMediaPostGenerator:
         if requests is None:
             return self._generate_local(topic, platform, tone, length, language, media_type, media_filename)
 
-        response = requests.post(
-            f"{HUGGINGFACE_INFERENCE_URL}{self.provider_model}",
-            headers={"Authorization": f"Bearer {self.api_key}"},
-            json={"inputs": prompt, "parameters": {"max_new_tokens": 400, "temperature": 0.75}},
-            timeout=60,
-        )
-        data = response.json()
+        try:
+            response = requests.post(
+                f"{HUGGINGFACE_INFERENCE_URL}{self.provider_model}",
+                headers={"Authorization": "Bearer " + self.api_key} if self.api_key else {},
+                json={"inputs": prompt, "parameters": {"max_new_tokens": 400, "temperature": 0.75}},
+                timeout=60,
+            )
+            response.raise_for_status()
+            data = response.json()
+        except Exception:
+            return self._generate_local(topic, platform, tone, length, language, media_type, media_filename)
+
         if isinstance(data, list) and data and "generated_text" in data[0]:
-            content = data[0]["generated_text"].strip()
+            content = str(data[0]["generated_text"]).strip()
         elif isinstance(data, dict):
-            content = data.get("generated_text", "").strip() or data.get("error", "")
+            content = str(data.get("generated_text", "")).strip() or str(data.get("error", "")).strip()
         else:
             content = ""
         return self._parse_json_response(content, topic, platform, tone, length, language, media_type, media_filename)
@@ -212,23 +244,28 @@ class SocialMediaPostGenerator:
         if requests is None:
             return self._generate_local(topic, platform, tone, length, language, media_type, media_filename)
 
-        response = requests.post(
-            COHERE_INFERENCE_URL,
-            headers={
-                "Authorization": f"Bearer {self.api_key}",
-                "Content-Type": "application/json",
-            },
-            json={
-                "model": self.provider_model,
-                "prompt": prompt,
-                "max_tokens": 300,
-                "temperature": 0.75,
-                "k": 0,
-                "p": 0.75,
-            },
-            timeout=60,
-        )
-        data = response.json()
+        try:
+            response = requests.post(
+                COHERE_INFERENCE_URL,
+                headers={
+                    "Authorization": "Bearer " + self.api_key,
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": self.provider_model,
+                    "prompt": prompt,
+                    "max_tokens": 300,
+                    "temperature": 0.75,
+                    "k": 0,
+                    "p": 0.75,
+                },
+                timeout=60,
+            )
+            response.raise_for_status()
+            data = response.json()
+        except Exception:
+            return self._generate_local(topic, platform, tone, length, language, media_type, media_filename)
+
         content = ""
         if isinstance(data, dict) and data.get("generations"):
             content = str(data["generations"][0].get("text", "")).strip()

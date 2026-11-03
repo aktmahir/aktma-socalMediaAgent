@@ -4,10 +4,12 @@ from social_media_agent.scheduler import PeriodicPostScheduler
 
 
 def parse_interval(interval: str) -> int:
-    if not interval:
+    if not interval or not interval.strip():
         return 0
     unit = interval[-1].lower()
     amount = int(interval[:-1])
+    if amount <= 0:
+        raise ValueError("Interval must be a positive integer value.")
     if unit == "s":
         return amount
     if unit == "m":
