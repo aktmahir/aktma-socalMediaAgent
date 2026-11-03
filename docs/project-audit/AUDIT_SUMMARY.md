@@ -25,8 +25,8 @@ The regression suite covers provider success/failure paths, local fallback, sche
 
 - Provider behavior has not been validated using real credentials or current provider-side model access.
 - Hugging Face inference availability and model compatibility depend on provider service support.
-- Scheduler job state is persisted, and web workers use daemon threads and stop with the web process. Jobs can be recovered manually or by running the opt-in `--supervise-scheduled` CLI supervisor.
-- Leases prevent concurrent workers per job within one SQLite database; the supervisor does not start automatically with the web app or machine and is not distributed coordination.
+- Scheduler job state is persisted, and web workers use daemon threads and stop with the web process. Jobs can be recovered manually or by running the opt-in `--supervise-scheduled` CLI supervisor; a Windows Task Scheduler registration script is available for current-user logon startup.
+- The Windows task is not registered automatically and starts only after the configured user signs in. Leases prevent concurrent workers per job within one SQLite database; they are not distributed coordination.
 - Once generated output is persisted, recovery replays it to the same file without calling the generator again. A process failure before payload persistence may still repeat the provider call.
 - Unexpected generator exceptions are retried up to three total attempts with 1- and 2-second delays; provider adapter fallback is treated as successful generation.
 - Failed jobs can be retried explicitly with `--retry-job JOB_ID`; the command refuses jobs that are not failed.
@@ -39,7 +39,7 @@ The regression suite covers provider success/failure paths, local fallback, sche
 
 1. Run credentialed smoke tests for supported providers and document verified model choices.
 2. Keep regression coverage current as features land.
-3. Configure the opt-in supervisor as an operating-system service/task if unattended recovery is required, and define provider outage behavior.
+3. Register the Windows supervisor task for the intended user if unattended recovery after sign-in is required, and define provider outage behavior.
 4. Add deployment controls, security protections, and operational monitoring before exposing the app beyond localhost.
 
 ## Overall conclusion

@@ -27,12 +27,12 @@ The CLI and web app validate required topics and allowed choices. Interval/count
 Remaining gaps:
 
 - `scheduled_output` is a filesystem path supplied by the user; deployment scenarios need explicit path constraints.
-- Web scheduled workers run in daemon threads and stop with the web process. SQLite records remain; manual recovery and an opt-in CLI supervisor are available, but unattended startup requires a separately configured operating-system service/task.
-- Per-job SQLite leases prevent concurrent workers sharing one database; separate databases are not coordinated, and automatic retry behavior is not implemented.
+- Web scheduled workers run in daemon threads and stop with the web process. SQLite records remain; manual recovery and an opt-in CLI supervisor are available. `scripts/register-scheduler-supervisor.ps1` provides optional Windows current-user logon startup, but the task must be registered explicitly.
+- Per-job SQLite leases prevent concurrent workers sharing one database; separate databases are not coordinated. Unexpected generator exceptions receive bounded retries.
 
 ## Reliability and observability
 
-Provider failures and API-level error responses are logged with fallback context. Web requests and scheduler lifecycle events also emit JSON records containing request/job IDs and non-sensitive status fields. Metrics, tracing, log retention, and centralized error reporting are not implemented.
+Provider failures and API-level error responses are logged with fallback context. Web requests and scheduler lifecycle events also emit JSON records containing request/job IDs and non-sensitive status fields. `/metrics` exposes in-process request counters and duration histograms, and `/health` reports application liveness only. Tracing, log retention, and centralized error reporting are not implemented.
 
 ## Security and deployment
 

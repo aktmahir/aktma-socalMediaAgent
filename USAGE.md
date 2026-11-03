@@ -96,7 +96,16 @@ For automatic recovery while the CLI supervisor is running, scan all running job
 python app.py --supervise-scheduled --scheduler-poll-seconds 5 --max-scheduled-workers 4
 ```
 
-The supervisor runs until Ctrl+C, and starts up to the configured worker limit. It can recover persisted jobs after an old worker lease expires, but it does not start automatically with the web app or after a machine restart. Use an operating-system service/task for unattended startup. The supervisor uses the same `--scheduler-db` and `--scheduled-output` paths as other scheduler commands.
+The supervisor runs until Ctrl+C and starts up to the configured worker limit. On Windows, register it to start at the current user's logon with the supplied Task Scheduler script:
+
+```powershell
+.\scripts\register-scheduler-supervisor.ps1 -PythonPath .venv\Scripts\python.exe -WhatIf
+.\scripts\register-scheduler-supervisor.ps1 -PythonPath .venv\Scripts\python.exe
+```
+
+The first command previews the registration; omit `-WhatIf` to create the task. The task runs as the current user with limited privileges, starts at the next logon (not before sign-in), and uses the repository's `scheduled_posts\` directory and SQLite database by default. Pass `-StartNow` to start it immediately as well. If the web form uses another scheduled-output directory, pass the same absolute or repository-relative path with `-OutputDirectory`; pass `-DatabasePath` if the jobs use a custom database. The selected Python executable must have the project dependencies installed. The app loads provider settings from the repository `.env` file; the task does not store API keys in its command line.
+
+To remove the task, run `.\scripts\register-scheduler-supervisor.ps1 -Unregister`. To view status, use `Get-ScheduledTask -TaskName "Social Media Agent Scheduler Supervisor"` and `Get-ScheduledTaskInfo -TaskName "Social Media Agent Scheduler Supervisor"`. The task is configured only for the current Windows user; logging out stops that user's process, and the next logon starts it again. The supervisor uses the same `--scheduler-db` and `--scheduled-output` paths as other scheduler commands.
 
 For a job marked `failed` after exhausting its bounded generation retries, use `--retry-job JOB_ID` to clear the retry state and run it again. The command is rejected for jobs that are not in the `failed` state.
 

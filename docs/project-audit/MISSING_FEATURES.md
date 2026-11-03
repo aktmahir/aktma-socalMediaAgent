@@ -8,7 +8,7 @@
 | MF-002 | Hugging Face/Cohere authentication and request handling | Implemented; mock-tested | P0 | Bearer auth and fallback behavior are tested; real provider/model availability is not. |
 | MF-003 | Core input and schedule validation | Implemented; tested | P0 | CLI, scheduler, and Flask test-client tests cover core invalid inputs and valid generation. |
 | MF-004 | Automated tests and CI | Implemented; locally and remotely verified | P1 | 49 `unittest` regression cases cover scheduler lifecycle, Flask routes, request metrics, health liveness, and provider mocks; GitHub Actions passed for Python 3.10–3.12 on commit `80d1215` (48 tests at that revision). |
-| MF-005 | Persistent schedule state | Implemented for local use | P1 | SQLite records jobs and generated outputs; CLI supports listing, pause/resume/cancel, manual recovery, an opt-in supervisor, leases, and three-attempt retries for unexpected generator exceptions. Automatic supervisor startup remains missing. |
+| MF-005 | Persistent schedule state | Implemented for local use | P1 | SQLite records jobs and generated outputs; CLI supports lifecycle operations and an opt-in supervisor. A PowerShell script can register current-user Windows logon startup; task registration remains an explicit operator action. |
 | MF-006 | Authentication and authorization | Missing | P1 | Keep deployment local until access control is added. |
 | MF-007 | Production deployment configuration | Missing | P1 | No production WSGI, readiness checks, or deploy pipeline. A local `/health` liveness endpoint does not establish production readiness. |
 | MF-008 | Actual media analysis | Missing | P2 | Upload name is prompt context; file contents are not processed. |
@@ -27,7 +27,7 @@ The form performs basic validation and displays status feedback. Flask test-clie
 
 ### Durable scheduling
 
-Scheduling writes files through local process workers and persists job records, attempts, and generated outputs in SQLite. CLI lifecycle controls, manual recovery, an opt-in supervisor, per-job worker leases, and bounded generator retries are available. The supervisor must be launched separately for unattended operation.
+Scheduling writes files through local process workers and persists job records, attempts, and generated outputs in SQLite. CLI lifecycle controls, manual recovery, an opt-in supervisor, per-job worker leases, and bounded generator retries are available. Windows users can opt in to current-user logon startup with `scripts/register-scheduler-supervisor.ps1`; no task is registered automatically.
 
 ### Media workflow
 

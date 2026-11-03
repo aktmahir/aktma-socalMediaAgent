@@ -24,7 +24,8 @@ This checklist reflects the current prototype status. Checked items are implemen
 - [x] SQLite worker leases prevent concurrent workers for the same job and expire for manual recovery after process failure.
 - [x] Operators can explicitly retry a job after bounded generation retries are exhausted.
 - [x] Opt-in CLI supervisor scans persisted running jobs and recovers expired workers with a configurable concurrency limit.
-- [ ] Automatic supervisor startup through the web app or an operating-system service/task.
+- [x] Optional Windows Task Scheduler registration script starts the supervisor at the current user's logon.
+- [x] Windows logon task is registered on this development machine; repeat per account/host when required.
 - [x] Bounded retry policy records failures and stops after three unexpected generator exceptions.
 - [ ] Provider/model outage policy beyond the existing local fallback behavior.
 - [ ] Actual image/video analysis and content-aware generation.
@@ -37,10 +38,11 @@ This checklist reflects the current prototype status. Checked items are implemen
 - [ ] CSRF protection and rate limiting for web routes.
 - [ ] Production WSGI/server and deployment configuration.
 - [ ] Secret-management and rotation guidance beyond local `.env`.
-- [ ] Health checks, structured application/scheduler logs, and monitoring.
+- [x] Application liveness endpoint, structured application/scheduler logs, and in-process request metrics.
+- [ ] Production readiness checks, persistent metrics, and centralized error reporting.
 - [x] CI workflow configured to run the regression suite.
 
-Jobs left running after process termination can be recovered manually with `--run-scheduled JOB_ID` or by running `--supervise-scheduled` after the 120-second lease expires. The supervisor must be launched separately; the lease is local to one SQLite database and is not a distributed or production-grade job service.
+Jobs left running after process termination can be recovered manually with `--run-scheduled JOB_ID` or by running `--supervise-scheduled` after the 120-second lease expires. On Windows, `scripts/register-scheduler-supervisor.ps1` provides opt-in current-user logon startup; the task is not registered automatically. The lease is local to one SQLite database and is not a distributed or production-grade job service.
 
 ## Completion gate
 

@@ -46,7 +46,7 @@ Set `AI_PROVIDER` to `openai`, `huggingface`, or `cohere` and configure the corr
 
 ## Persistence and runtime boundaries
 
-Generated posts are returned as dictionaries or written as JSON files. Scheduled job records use SQLite (default: `scheduled_posts/scheduler.sqlite3`), while workers remain process-local. SQLite leases prevent overlapping workers for the same job; the CLI offers manual recovery and an opt-in supervisor that scans persisted running jobs. Unexpected generator exceptions are retried up to three times. The supervisor must be launched separately and there is no cross-database coordination. Uploaded files are stored under `uploads/`.
+Generated posts are returned as dictionaries or written as JSON files. Scheduled job records use SQLite (default: `scheduled_posts/scheduler.sqlite3`), while workers remain process-local. SQLite leases prevent overlapping workers for the same job; the CLI offers manual recovery and an opt-in supervisor that scans persisted running jobs. Unexpected generator exceptions are retried up to three times. Windows users can register current-user logon startup through `scripts/register-scheduler-supervisor.ps1`; registration is an explicit action, not part of installation. There is no cross-database coordination. Uploaded files are stored under `uploads/`.
 
 The web runner binds to localhost with Flask debug disabled. This is not a production deployment configuration; there is no authentication, authorization, CSRF protection, rate limiting, or production server setup.
 

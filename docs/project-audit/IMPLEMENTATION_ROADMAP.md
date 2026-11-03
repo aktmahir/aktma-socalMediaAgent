@@ -49,7 +49,8 @@
 - **Status:** Implemented as an opt-in local CLI supervisor.
 - **Description:** `--supervise-scheduled` scans persisted running jobs and launches up to a configurable number of workers; worker leases prevent duplicate execution for the same database/job.
 - **Verification:** Regression tests cover recovery of a persisted running job and CLI option dispatch.
-- **Limitations:** The supervisor must itself be started manually or configured as an operating-system service/task. It is not automatically started by the web process, and local SQLite leases are not distributed coordination.
+- **Windows setup:** `scripts/register-scheduler-supervisor.ps1` can register a current-user logon task, with `-WhatIf`, optional immediate start, and an unregister mode. Registration remains an explicit operator action; it is not run automatically by installation.
+- **Limitations:** The task starts after that user signs in and stops when the user session ends; it does not provide pre-login machine startup. The supervisor is not started by the web process, and local SQLite leases are not distributed coordination.
 
 ## Phase 3 — Integration and Data Reliability
 
