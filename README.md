@@ -84,7 +84,27 @@ python app.py --topic "weekly marketing tip" --platform instagram --media-type i
 - `--count 7` generates 7 scheduled post drafts; it does not publish to a social network.
 - `--count 0` runs indefinitely until stopped.
 - Scheduled post files are saved under `scheduled_posts/` by default.
+- Job records are persisted in `scheduled_posts/scheduler.sqlite3` by default.
 - Intervals must be positive values followed by `s`, `m`, `h`, or `d`; post counts must be non-negative integers.
+- Unexpected generator exceptions are retried up to 3 attempts with 1- and 2-second delays; exhausted jobs are marked failed with the last error. Provider adapter failures that return the local fallback are treated as successful generation.
+
+Manage persisted jobs from another terminal:
+
+```bash
+python app.py --list-scheduled
+python app.py --pause-job JOB_ID
+python app.py --resume-job JOB_ID
+python app.py --cancel-job JOB_ID
+python app.py --retry-job JOB_ID
+```
+
+Use `--retry-job JOB_ID` to explicitly restart a job that reached `failed` after exhausting its generation attempts. It clears that iteration's retry count/error and runs the job again. The SQLite lease prevents two live workers from running the same job. A worker renews its 120-second lease every 20 seconds; if a process crashes, wait for the lease to expire before recovering. Recover one job manually with `python app.py --run-scheduled JOB_ID`, or run the opt-in local supervisor to scan and recover all running jobs:
+
+```bash
+python app.py --supervise-scheduled --scheduler-poll-seconds 5 --max-scheduled-workers 4
+```
+
+The supervisor runs until stopped with Ctrl+C, scans the configured SQLite database, and starts up to the worker limit. It can recover persisted running jobs after their old worker leases expire, but it does not automatically start when the web app or machine starts; configure an operating-system service/task if unattended operation is needed. A paused job must be resumed before it will run. Generated payloads saved to SQLite are replayed to the same output file if progress recording was interrupted, avoiding another generator call. A crash before the payload is saved can still repeat generation. Use `--scheduler-db PATH` when the database is not at its default location. If the web form used a custom scheduled-output folder, pass the same folder with `--scheduled-output` when managing jobs. Coordination is local to the SQLite database and is not a distributed worker service.
 
 ## Web Interface
 
@@ -96,7 +116,7 @@ python web.py
 
 Then open `http://127.0.0.1:5000` in your browser.
 
-The web UI includes scheduling controls for interval, post count, and output folder. When you submit a schedule, the app starts generating drafts in the background and saves them under the selected output folder; it does not publish to a social network.
+The web UI includes scheduling controls for interval, post count, and output folder. When you submit a schedule, the app starts generating drafts in the background, stores the job in SQLite, and saves drafts under the selected output folder; it does not publish to a social network. The job ID is shown in the status message and can be managed with the CLI.
 Invalid topics, unsupported form selections, file types, counts, and intervals are rejected with status feedback. The scheduler itself also rejects non-positive intervals and negative counts.
 
 If the package is installed, use the console entry point:
@@ -127,6 +147,7 @@ Supported platforms include YouTube video posts and YouTube Shorts.
 - Hashtag creation and call-to-action support
 - YouTube video metadata generation: title, description, and tags
 - Input and scheduling validation across the CLI, web app, and scheduler
+- SQLite-backed scheduled job records with CLI inspection, pause, resume, cancel, and recovery
 - Regression tests runnable with Python's built-in `unittest` runner
 
 ## Validation
@@ -138,6 +159,14 @@ python -m unittest discover -s tests -v
 ```
 
 Provider behavior is covered by mocked tests. Live API calls require valid provider credentials and have not been verified as part of the local test suite.
+
+## Continuous integration
+
+The repository includes a GitHub Actions workflow that installs the app dependencies and runs the full unittest suite on every push and pull request. The CI entry point is:
+
+- `.github/workflows/python-tests.yml`
+
+This keeps the Phase 1 and Phase 2 regression checks reproducible across supported Python versions.
 
 ## Extending
 

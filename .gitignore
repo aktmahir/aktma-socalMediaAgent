@@ -66,6 +66,11 @@ instance/
 .webassets-cache
 uploads/
 
+# Generated schedule output and local job state
+scheduled_posts/
+*.sqlite3
+*.sqlite3-journal
+
 # Scrapy stuff:
 .scrapy
 

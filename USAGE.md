@@ -70,8 +70,37 @@ python app.py --topic "weekly marketing tip" --platform instagram --interval 1d 
 - Interval units: `s` (seconds), `m` (minutes), `h` (hours), or `d` (days); the value must be positive.
 - `--count` must be a non-negative integer. `0` means run indefinitely until stopped.
 - Scheduled JSON files are written to `scheduled_posts/` by default; change this with `--scheduled-output`.
+- Job records are stored in SQLite at `scheduled_posts/scheduler.sqlite3` by default. Override the database with `--scheduler-db PATH`.
 - The scheduler validates interval seconds and count even when called directly.
-- The scheduler is an in-process loop. It has no persistent job records, pause/resume controls, or recovery after app restarts.
+- Unexpected generator exceptions are retried up to 3 attempts with 1- and 2-second delays; after exhaustion the job is marked failed and the error remains in SQLite. Provider adapter failures that use the local fallback are treated as successful generation.
+
+Manage jobs from another terminal:
+
+```powershell
+python app.py --list-scheduled
+python app.py --pause-job JOB_ID
+python app.py --resume-job JOB_ID
+python app.py --cancel-job JOB_ID
+python app.py --retry-job JOB_ID
+```
+
+If a process stops unexpectedly, list jobs to find a still-running job ID and recover it manually with:
+
+```powershell
+python app.py --run-scheduled JOB_ID
+```
+
+For automatic recovery while the CLI supervisor is running, scan all running jobs in the configured database:
+
+```powershell
+python app.py --supervise-scheduled --scheduler-poll-seconds 5 --max-scheduled-workers 4
+```
+
+The supervisor runs until Ctrl+C, and starts up to the configured worker limit. It can recover persisted jobs after an old worker lease expires, but it does not start automatically with the web app or after a machine restart. Use an operating-system service/task for unattended startup. The supervisor uses the same `--scheduler-db` and `--scheduled-output` paths as other scheduler commands.
+
+For a job marked `failed` after exhausting its bounded generation retries, use `--retry-job JOB_ID` to clear the retry state and run it again. The command is rejected for jobs that are not in the `failed` state.
+
+The SQLite lease rejects a second worker while one is active. The worker renews its 120-second lease every 20 seconds; if a process crashes, wait for the lease to expire before recovery. Generated payloads saved to SQLite are replayed to the same output file if progress recording was interrupted; a crash before saving the payload can still repeat generation. Resume a paused job with `--resume-job` first, then run `--run-scheduled JOB_ID` if its worker is no longer active. When managing a job created in the web UI with a custom output folder, pass that same folder through `--scheduled-output` (or provide the exact database path with `--scheduler-db`). Coordination is local to one SQLite database; this is not a distributed worker service.
 
 ## 4. Run the web interface
 
@@ -81,7 +110,7 @@ python web.py
 
 Open `http://127.0.0.1:5000`. The app listens on localhost and starts with Flask debug mode disabled.
 
-The form validates the topic, supported select values, uploaded file extensions, schedule interval, and post count. Scheduling starts a background thread in the current process; closing the process stops that schedule. A status message is shown in the page for validation or scheduler feedback.
+The form validates the topic, supported select values, uploaded file extensions, schedule interval, and post count. Scheduling creates a SQLite job and starts a background thread in the current process; closing the process stops that worker but preserves its job record for CLI recovery. A status message includes the job ID for validation or scheduler feedback.
 
 ## 5. Uploads and media limitations
 

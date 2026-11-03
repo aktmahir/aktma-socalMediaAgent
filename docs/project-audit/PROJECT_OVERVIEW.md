@@ -17,7 +17,8 @@ The project is a Python application for generating social media content from a t
 - Uses OpenAI, Hugging Face, or Cohere when configured with a key and a usable model.
 - Falls back to a randomized local template generator if no provider is configured or a provider fails.
 - Offers a CLI (`app.py`) and a local Flask interface (`web.py`).
-- Saves scheduled generated posts as JSON files in an in-process loop.
+- Saves generated posts as JSON files and persists schedule configuration/progress in SQLite.
+- Provides CLI commands to inspect, pause, resume, cancel, manually recover, and supervise persisted scheduled jobs.
 - Accepts web uploads by extension and uses the filename as prompt context; it does not analyze file contents.
 
 ## Architecture
@@ -25,9 +26,9 @@ The project is a Python application for generating social media content from a t
 - `app.py` — CLI argument parsing and generation/scheduling entry point.
 - `social_media_agent/generator.py` — prompt construction, provider adapters, response parsing, and local fallback.
 - `social_media_agent/web.py` — Flask route, form validation, and upload handling.
-- `social_media_agent/scheduler.py` — shared interval/count parsing and in-process periodic output loop.
+- `social_media_agent/scheduler.py` — shared interval/count parsing, SQLite-backed job lifecycle, and periodic output loop.
 - `social_media_agent/templates/index.html` — server-rendered web form and result/status display.
-- `tests/test_phase1_regressions.py` — `unittest` regression coverage using mocked provider responses.
+- `tests/` — `unittest` regression coverage for provider mocks, Flask routes, and scheduler behavior.
 
 ## Technology
 
@@ -45,10 +46,10 @@ Set `AI_PROVIDER` to `openai`, `huggingface`, or `cohere` and configure the corr
 
 ## Persistence and runtime boundaries
 
-There is no database. Generated posts are returned as dictionaries or written as JSON files. Scheduled jobs are process-local and are lost when the process exits. Uploaded files are stored under `uploads/`.
+Generated posts are returned as dictionaries or written as JSON files. Scheduled job records use SQLite (default: `scheduled_posts/scheduler.sqlite3`), while workers remain process-local. SQLite leases prevent overlapping workers for the same job; the CLI offers manual recovery and an opt-in supervisor that scans persisted running jobs. Unexpected generator exceptions are retried up to three times. The supervisor must be launched separately and there is no cross-database coordination. Uploaded files are stored under `uploads/`.
 
 The web runner binds to localhost with Flask debug disabled. This is not a production deployment configuration; there is no authentication, authorization, CSRF protection, rate limiting, or production server setup.
 
 ## Current status
 
-Phase 1 provider compatibility, request error handling, and core CLI/web/scheduler validation are implemented with regression tests. Remaining Phase 1 confidence work includes live provider smoke tests and Flask test-client coverage. Persistent scheduling, richer media processing, multi-user access, and deployment hardening remain future work.
+Phase 1 provider compatibility, request error handling, and core CLI/web/scheduler validation are implemented with regression tests. Phase 2 adds CI, Flask route coverage, SQLite-backed local job lifecycle controls, worker leases, bounded generation retries, and an opt-in local scheduler supervisor. Live provider smoke tests, automatic supervisor startup, richer media processing, multi-user access, and deployment hardening remain future work.

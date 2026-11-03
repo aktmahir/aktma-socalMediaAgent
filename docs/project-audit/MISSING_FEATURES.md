@@ -6,9 +6,9 @@
 | --- | --- | --- | --- | --- |
 | MF-001 | OpenAI SDK compatibility | Implemented; mock-tested | P0 | Current OpenAI client path is used; live access remains unverified. |
 | MF-002 | Hugging Face/Cohere authentication and request handling | Implemented; mock-tested | P0 | Bearer auth and fallback behavior are tested; real provider/model availability is not. |
-| MF-003 | Core input and schedule validation | Implemented; partially tested | P0 | CLI and scheduler tests exist; web route-level tests are still needed. |
-| MF-004 | Automated tests and CI | Partially implemented | P1 | `unittest` regression tests are present; CI and web route tests are absent. |
-| MF-005 | Persistent schedule state | Missing | P1 | Jobs cannot be paused, inspected, resumed, or recovered after restart. |
+| MF-003 | Core input and schedule validation | Implemented; tested | P0 | CLI, scheduler, and Flask test-client tests cover core invalid inputs and valid generation. |
+| MF-004 | Automated tests and CI | Implemented; locally verified | P1 | `unittest` regression coverage includes scheduler lifecycle and Flask routes; GitHub Actions runs the suite. |
+| MF-005 | Persistent schedule state | Implemented for local use | P1 | SQLite records jobs and generated outputs; CLI supports listing, pause/resume/cancel, manual recovery, an opt-in supervisor, leases, and three-attempt retries for unexpected generator exceptions. Automatic supervisor startup remains missing. |
 | MF-006 | Authentication and authorization | Missing | P1 | Keep deployment local until access control is added. |
 | MF-007 | Production deployment configuration | Missing | P1 | No production WSGI, health checks, or deploy pipeline. |
 | MF-008 | Actual media analysis | Missing | P2 | Upload name is prompt context; file contents are not processed. |
@@ -23,11 +23,11 @@ The adapters now use current request patterns and have mock tests for response p
 
 ### Web test coverage
 
-The form performs basic validation and displays status feedback, but the Flask route is not covered by automated test-client tests. Add coverage for invalid topics, unsupported choices, upload extension rejection, invalid count/interval, and valid generation/scheduling flows.
+The form performs basic validation and displays status feedback. Flask test-client tests cover valid generation, invalid schedule input, and valid schedule creation; upload rejection remains a candidate for additional route coverage.
 
 ### Durable scheduling
 
-Scheduling remains a local process loop that writes files. Persistent job records, lifecycle controls, retry policy, and restart recovery are not available.
+Scheduling writes files through local process workers and persists job records, attempts, and generated outputs in SQLite. CLI lifecycle controls, manual recovery, an opt-in supervisor, per-job worker leases, and bounded generator retries are available. The supervisor must be launched separately for unattended operation.
 
 ### Media workflow
 

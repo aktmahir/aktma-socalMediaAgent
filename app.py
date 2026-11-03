@@ -1,4 +1,6 @@
 import argparse
+from datetime import datetime
+
 from social_media_agent.generator import SocialMediaPostGenerator
 from social_media_agent.scheduler import PeriodicPostScheduler, parse_interval
 
@@ -7,7 +9,31 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description="Generate social media posts automatically using AI or a smart local fallback."
     )
-    parser.add_argument("--topic", required=True, help="The topic or theme for the social media post.")
+    scheduler_actions = parser.add_mutually_exclusive_group()
+    scheduler_actions.add_argument(
+        "--list-scheduled",
+        action="store_true",
+        help="List persisted scheduled jobs.",
+    )
+    scheduler_actions.add_argument("--pause-job", metavar="JOB_ID", help="Pause a scheduled job.")
+    scheduler_actions.add_argument("--resume-job", metavar="JOB_ID", help="Resume a paused job.")
+    scheduler_actions.add_argument("--cancel-job", metavar="JOB_ID", help="Cancel a scheduled job.")
+    scheduler_actions.add_argument(
+        "--retry-job",
+        metavar="JOB_ID",
+        help="Reset and run a job that exhausted its generation attempts.",
+    )
+    scheduler_actions.add_argument(
+        "--run-scheduled",
+        metavar="JOB_ID",
+        help="Run or recover a persisted scheduled job.",
+    )
+    scheduler_actions.add_argument(
+        "--supervise-scheduled",
+        action="store_true",
+        help="Continuously recover and run persisted scheduled jobs.",
+    )
+    parser.add_argument("--topic", help="The topic or theme for the social media post.")
     parser.add_argument(
         "--platform",
         default="instagram",
@@ -74,12 +100,24 @@ def main() -> None:
         default="scheduled_posts",
         help="Directory where scheduled posts are written.",
     )
+    parser.add_argument(
+        "--scheduler-db",
+        default="",
+        help="Path to the SQLite scheduler database (defaults to scheduler.sqlite3 in the output directory).",
+    )
+    parser.add_argument(
+        "--scheduler-poll-seconds",
+        type=int,
+        default=5,
+        help="Seconds between scans when --supervise-scheduled is enabled.",
+    )
+    parser.add_argument(
+        "--max-scheduled-workers",
+        type=int,
+        default=4,
+        help="Maximum concurrent jobs when --supervise-scheduled is enabled.",
+    )
     args = parser.parse_args()
-
-    if not args.topic.strip():
-        parser.error("--topic must not be empty.")
-    if args.count < 0:
-        parser.error("--count must be a non-negative integer.")
 
     provider_model = args.provider_model or (
         args.openai_model if args.ai_provider == "openai" else None
@@ -90,6 +128,68 @@ def main() -> None:
         provider=args.ai_provider,
         provider_model=provider_model,
     )
+
+    def create_scheduler() -> PeriodicPostScheduler:
+        return PeriodicPostScheduler(
+            generator,
+            output_dir=args.scheduled_output,
+            database_path=args.scheduler_db or None,
+        )
+
+    try:
+        if args.list_scheduled:
+            scheduler = create_scheduler()
+            jobs = scheduler.list_jobs()
+            if not jobs:
+                print("No scheduled jobs found.")
+            for job in jobs:
+                summary = (
+                    f"{job['id']}  {job['status']}  "
+                    f"{job['completed_count']}/{job['target_count'] or 'unlimited'}  "
+                    f"next={datetime.fromtimestamp(float(job['next_run_at'])).isoformat()}"
+                )
+                if job["last_error"]:
+                    summary += f"  error={job['last_error']}"
+                print(summary)
+            return
+        if args.pause_job:
+            scheduler = create_scheduler()
+            scheduler.pause_job(args.pause_job)
+            print(f"Paused scheduled job {args.pause_job}.")
+            return
+        if args.resume_job:
+            scheduler = create_scheduler()
+            scheduler.resume_job(args.resume_job)
+            print(f"Resumed scheduled job {args.resume_job}.")
+            return
+        if args.cancel_job:
+            scheduler = create_scheduler()
+            scheduler.cancel_job(args.cancel_job)
+            print(f"Cancelled scheduled job {args.cancel_job}.")
+            return
+        if args.retry_job:
+            scheduler = create_scheduler()
+            scheduler.retry_failed_job(args.retry_job)
+            return
+        if args.run_scheduled:
+            scheduler = create_scheduler()
+            scheduler.run_scheduled_job(args.run_scheduled)
+            return
+        if args.supervise_scheduled:
+            scheduler = create_scheduler()
+            scheduler.run_supervisor(
+                poll_interval_seconds=args.scheduler_poll_seconds,
+                max_workers=args.max_scheduled_workers,
+            )
+            return
+    except ValueError as exc:
+        parser.error(str(exc))
+
+    if not args.topic or not args.topic.strip():
+        parser.error("--topic is required and must not be empty.")
+    if args.count < 0:
+        parser.error("--count must be a non-negative integer.")
+
     post_config = {
         "topic": args.topic,
         "platform": args.platform,
@@ -107,7 +207,7 @@ def main() -> None:
             parser.error(str(exc))
         if interval_seconds == 0:
             parser.error("--interval must be a positive duration.")
-        scheduler = PeriodicPostScheduler(generator, output_dir=args.scheduled_output)
+        scheduler = create_scheduler()
         scheduler.schedule(post_config, interval_seconds=interval_seconds, count=args.count)
         return
 

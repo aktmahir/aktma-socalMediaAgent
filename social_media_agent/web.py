@@ -102,14 +102,19 @@ def create_app() -> Flask:
                     status_message = str(exc)
                 else:
                     scheduler = PeriodicPostScheduler(generator, output_dir=values["scheduled_output"])
+                    job_id = scheduler.create_job(
+                        post_config,
+                        interval_seconds=interval_seconds,
+                        count=values["count"],
+                    )
                     thread = threading.Thread(
-                        target=scheduler.schedule,
-                        kwargs={"post_config": post_config, "interval_seconds": interval_seconds, "count": values["count"]},
+                        target=scheduler.run_scheduled_job,
+                        kwargs={"job_id": job_id},
                         daemon=True,
                     )
                     thread.start()
                     status_message = (
-                        f"Scheduled posting started every {values['interval']}. "
+                        f"Scheduled job {job_id} started every {values['interval']}. "
                         f"Saved output to {values['scheduled_output']}/"
                     )
             elif values["topic"] and not values["interval"] and not status_message:

@@ -1,4 +1,5 @@
 import json
+import os
 import sys
 import tempfile
 import unittest
@@ -16,13 +17,14 @@ from app import parse_interval
 
 class PhaseOneRegressionTests(unittest.TestCase):
     def test_generate_post_local_fallback_returns_expected_shape(self) -> None:
-        generator = SocialMediaPostGenerator()
-        post = generator.generate_post(
-            topic="AI marketing",
-            platform="linkedin",
-            tone="professional",
-            length="medium",
-        )
+        with patch.dict(os.environ, {"OPENAI_API_KEY": ""}):
+            generator = SocialMediaPostGenerator()
+            post = generator.generate_post(
+                topic="AI marketing",
+                platform="linkedin",
+                tone="professional",
+                length="medium",
+            )
 
         self.assertTrue(
             {"caption", "hashtags", "call_to_action", "title", "description", "tags"}

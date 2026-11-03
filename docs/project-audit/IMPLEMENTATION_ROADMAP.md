@@ -17,30 +17,38 @@
 - **Remaining verification:** Live credentialed requests and provider-side model availability. Hugging Face availability depends on the configured model and currently available inference service.
 
 ### ROAD-03 — User input and scheduler validation
-- **Status:** Core checks implemented; CLI/scheduler tests added; web route tests outstanding.
+- **Status:** Implemented; locally tested.
 - **Description:** Reject malformed topics, options, intervals, counts, and unsupported upload extensions, and guard scheduler direct calls.
 - **Modules:** `app.py`, `social_media_agent/web.py`, `social_media_agent/scheduler.py`
 - **Acceptance:** CLI reports invalid arguments with parser errors; web form returns status feedback; scheduler rejects invalid interval seconds and negative counts.
-- **Remaining verification:** Flask test-client tests for valid and invalid form submissions.
+- **Verification:** Flask test-client tests cover valid generation and invalid schedule input.
 
 ## Phase 2 — Core Feature Completion
 
 ### ROAD-04 — Automated tests and CI
-- **Status:** Partially implemented.
+- **Status:** Implemented; locally verified.
 - **Description:** Expand regression coverage to the scheduler and generator and run it automatically.
 - **Modules:** `tests/`, CI configuration.
-- **Current state:** `unittest` regression tests cover local fallback, OpenAI/Hugging Face/Cohere mocks, provider failures, and schedule validation.
-- **Remaining:** Scheduler output-file lifecycle tests, Flask route coverage, and a CI workflow.
+- **Current state:** `unittest` regression tests cover provider mocks and failures, scheduler output/recovery/supervision, and Flask generation and schedule submissions. GitHub Actions runs the suite on pushes and pull requests across Python 3.10–3.12.
+- **Remaining:** Verify the workflow on GitHub and expand coverage as new features land.
 
 ### ROAD-05 — Persistent scheduling
-- **Status:** Not started.
+- **Status:** Implemented for local use with a SQLite worker lease.
 - **Description:** Add durable job records, lifecycle state, and recovery.
-- **Acceptance:** Jobs can be inspected, paused/resumed, and recovered after restart.
+- **Modules:** `social_media_agent/scheduler.py`, `app.py`, `social_media_agent/web.py`
+- **Acceptance:** SQLite stores job configuration, status, progress, next run, and failures. CLI supports listing, pausing, resuming, cancelling, and resuming a persisted running job after restart.
+- **Limitations:** Recovery is available manually through `--run-scheduled JOB_ID` or continuously through the opt-in `--supervise-scheduled` CLI command after the 120-second worker lease expires. The lease prevents overlapping workers for the same database/job but is not distributed coordination. Unexpected generator exceptions are retried up to three attempts with 1- and 2-second delays; terminal errors are persisted and can be retried explicitly with `--retry-job JOB_ID`. Provider adapter failures that use the local fallback are treated as successful generation. Persisted generation payloads replay to the same output file if progress recording is interrupted; provider calls may repeat if interruption occurs before the payload is committed. Web-created workers are daemon threads and stop with the web process.
 
 ### ROAD-06 — Authentication and authorization
 - **Status:** Not started; required only if shared deployment is in scope.
 - **Description:** Protect user-facing routes and separate user/job ownership.
 - **Acceptance:** Enforced identity and permissions with route-level tests.
+
+### ROAD-11 — Process supervision
+- **Status:** Implemented as an opt-in local CLI supervisor.
+- **Description:** `--supervise-scheduled` scans persisted running jobs and launches up to a configurable number of workers; worker leases prevent duplicate execution for the same database/job.
+- **Verification:** Regression tests cover recovery of a persisted running job and CLI option dispatch.
+- **Limitations:** The supervisor must itself be started manually or configured as an operating-system service/task. It is not automatically started by the web process, and local SQLite leases are not distributed coordination.
 
 ## Phase 3 — Integration and Data Reliability
 
@@ -55,7 +63,7 @@
 ## Phase 4 — UX and Product Completeness
 
 ### ROAD-09 — Web feedback and state
-- **Status:** Basic status feedback is present; deeper state and route tests remain.
+- **Status:** Basic status feedback and route tests are implemented; scheduled job IDs link the UI to CLI lifecycle controls.
 - **Description:** Ensure validation errors, generation results, and scheduling status are clear and consistently styled.
 
 ## Phase 5 — Production Readiness
@@ -66,7 +74,7 @@
 
 ## Phase completion criteria
 
-- **Phase 1:** Provider adapters and basic input/schedule checks are implemented and mock-tested; live provider and web route validation remain.
+- **Phase 1:** Provider adapters and basic input/schedule checks are implemented and mock-tested; live provider smoke tests remain.
 - **Phase 2:** Core behavior has broad test coverage and scheduled jobs have durable state.
 - **Phase 3:** Upload/data handling and operational controls are reliable.
 - **Phase 4:** The UI presents clear, tested workflows.
@@ -74,7 +82,7 @@
 
 ## Recommended next actions
 
-1. Add Flask test-client tests covering valid and invalid submissions.
+1. Verify the GitHub Actions workflow on a push or pull request.
 2. Run credentialed smoke tests for OpenAI, Hugging Face, and Cohere using supported models.
-3. Decide if persistence and shared deployment are required before building job state or authentication.
-4. Add CI and production safeguards before external exposure.
+3. Configure the opt-in supervisor as an operating-system service/task if unattended recovery is required, and define provider outage behavior.
+4. Add deployment, access-control, and production safeguards before external exposure.

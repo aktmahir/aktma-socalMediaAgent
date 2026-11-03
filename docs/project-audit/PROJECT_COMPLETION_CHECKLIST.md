@@ -13,14 +13,20 @@ This checklist reflects the current prototype status. Checked items are implemen
 - [x] Web form validates basic topic, option, extension, count, and interval input.
 - [x] Scheduler rejects non-positive intervals and negative counts on direct calls.
 - [x] Regression tests pass using Python's built-in `unittest` runner.
+- [x] Flask test-client coverage exercises valid generation, invalid scheduling input, and valid scheduled-job creation.
+- [x] GitHub Actions workflow runs the test suite on pushes and pull requests.
 - [ ] Credentialed live smoke tests for each external provider.
-- [ ] Flask test-client coverage for valid and invalid form submissions.
 
 ## Core product and reliability
 
-- [ ] Persistent schedule records and job lifecycle controls.
-- [ ] Scheduler pause, resume, cancellation, and recovery after process restart.
-- [ ] Retry policy and defined behavior for provider/model outages.
+- [x] SQLite persists schedule configuration, status, progress, next-run time, and failures.
+- [x] CLI supports listing, pausing, resuming, cancelling, and recovering a persisted running job.
+- [x] SQLite worker leases prevent concurrent workers for the same job and expire for manual recovery after process failure.
+- [x] Operators can explicitly retry a job after bounded generation retries are exhausted.
+- [x] Opt-in CLI supervisor scans persisted running jobs and recovers expired workers with a configurable concurrency limit.
+- [ ] Automatic supervisor startup through the web app or an operating-system service/task.
+- [x] Bounded retry policy records failures and stops after three unexpected generator exceptions.
+- [ ] Provider/model outage policy beyond the existing local fallback behavior.
 - [ ] Actual image/video analysis and content-aware generation.
 - [ ] Upload size and content validation beyond extension checks.
 
@@ -31,7 +37,9 @@ This checklist reflects the current prototype status. Checked items are implemen
 - [ ] Production WSGI/server and deployment configuration.
 - [ ] Secret-management and rotation guidance beyond local `.env`.
 - [ ] Health checks, structured application/scheduler logs, and monitoring.
-- [ ] CI workflow running the regression suite.
+- [x] CI workflow configured to run the regression suite.
+
+Jobs left running after process termination can be recovered manually with `--run-scheduled JOB_ID` or by running `--supervise-scheduled` after the 120-second lease expires. The supervisor must be launched separately; the lease is local to one SQLite database and is not a distributed or production-grade job service.
 
 ## Completion gate
 

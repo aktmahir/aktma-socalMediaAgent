@@ -14,12 +14,12 @@ The project provides a small local workflow for generating social media content.
 | Hugging Face generation | Implemented; mock-tested | Sends Bearer auth and handles HTTP/API error responses with logged local fallback. Actual model availability is external. |
 | Cohere generation | Implemented; mock-tested | Uses the v2 Chat endpoint and parses text content; live API access has not been tested. |
 | Local fallback | Implemented | Returns caption, hashtags, CTA, and YouTube metadata without an external provider. Output uses randomized templates. |
-| Web generation | Implemented; not route-tested | Flask form renders generation results and status feedback; automated Flask test-client coverage is still needed. |
+| Web generation and scheduling | Implemented; route-tested | Flask test-client coverage exercises valid generation, invalid schedule feedback, and creation of a persisted scheduled job. |
 | Input validation | Implemented for core fields | CLI, web, and scheduler validate topic, selection values, file extensions, counts, and intervals. This is not comprehensive abuse protection. |
 | Upload support | Limited | Files are stored locally and their names enter the prompt; contents are not processed. Extension checks do not inspect file contents. |
-| Scheduling | Prototype | A background/in-process loop writes JSON files; there is no persistence, job status API, pause/resume, or restart recovery. |
+| Scheduling | Implemented for local use | SQLite persists job configuration, status, progress, next-run time, failures, and output payloads. CLI supports listing, pausing, resuming, cancelling, manual recovery, and opt-in supervision of persisted running jobs. Per-job expiring leases prevent concurrent workers within the same database; unexpected generator exceptions receive up to three attempts. |
 | YouTube metadata | Implemented | Title, description, and tags are included in output; provider response parsing falls back when malformed. |
-| Automated tests | Present | `python -m unittest discover -s tests -v`; provider integrations are mocked. No CI workflow is configured. |
+| Automated tests | Implemented; CI configured | `python -m unittest discover -s tests -v`; Flask and scheduler coverage is included. GitHub Actions runs tests across Python 3.10–3.12. Provider integrations remain mocked. |
 | Production deployment | Missing | No production deployment, authentication, rate limiting, database, or operational readiness configuration. |
 
 ## Phase 1 changes and verification
@@ -37,16 +37,17 @@ The project provides a small local workflow for generating social media content.
 - Shared schedule interval and count parsers reject malformed, empty, zero/negative interval, and negative/empty count values as applicable.
 - CLI errors are reported through argparse; the web form returns status feedback; scheduler direct calls reject invalid interval seconds and counts.
 - Empty topics and unsupported web select choices are rejected rather than sent to generation.
-- Tests cover CLI parsing and scheduler guards. The Flask route still needs automated test-client coverage.
+- Tests cover CLI parsing, scheduler validation/persistence/recovery, and valid/invalid Flask test-client submissions.
 
 ## Known limitations
 
 - The local generator is a template-based fallback, not an AI model.
 - Uploaded media is not inspected or understood by the generator.
-- Web schedules are daemon-thread jobs and disappear when the process exits.
+- Web schedules use daemon-thread workers that stop when the process exits; the SQLite job remains and can be recovered with `--run-scheduled JOB_ID` or the opt-in `--supervise-scheduled` CLI command.
+- Leases prevent concurrent workers for one job in a shared SQLite database; separate databases are not coordinated. Unexpected generator exceptions are retried; adapter fallback results are treated as successful generation.
 - Provider failure fallback means a successful local result does not imply the external provider succeeded.
 - There is no authentication or protection against repeated public requests; the web app is intended for local use.
 
 ## Functional conclusion
 
-The core local use case is available and the Phase 1 critical paths have regression tests. The project remains a prototype: provider integrations need credentialed smoke tests, web request paths need route tests, and scheduling lacks durable lifecycle management.
+The core local use case is available with automated web and scheduler lifecycle coverage. The project remains a prototype: provider integrations need credentialed smoke tests, the opt-in supervisor requires separate startup configuration for unattended use, and production safeguards remain incomplete.
