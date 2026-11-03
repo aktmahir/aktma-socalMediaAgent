@@ -406,14 +406,21 @@ class PeriodicPostScheduler:
                     status,
                     time.time() + int(job["interval_seconds"]),
                 )
+                generation_source = post.get("generation_source")
+                if generation_source not in ("local", "provider"):
+                    generation_source = "unknown"
                 log_event(
                     logger,
                     "scheduler.iteration_completed",
                     job_id=job_id,
                     completed_count=completed_count,
                     status=status,
+                    generation_source=generation_source,
                 )
-                print(f"[{datetime.now().isoformat()}] Generated scheduled post #{completed_count}: {filename}")
+                print(
+                    f"[{datetime.now().isoformat()}] Generated scheduled post "
+                    f"#{completed_count} ({generation_source}): {filename}"
+                )
                 if status == "completed":
                     return
         except Exception as exc:

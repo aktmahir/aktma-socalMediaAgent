@@ -108,7 +108,10 @@ class PhaseTwoCoverageTests(unittest.TestCase):
 
     def test_scheduler_logs_job_lifecycle_without_post_configuration(self) -> None:
         generator = Mock()
-        generator.generate_post.return_value = {"caption": "Generated"}
+        generator.generate_post.return_value = {
+            "caption": "Generated",
+            "generation_source": "local",
+        }
         with tempfile.TemporaryDirectory() as tmp_dir:
             scheduler = PeriodicPostScheduler(generator, output_dir=tmp_dir)
             with self.assertLogs("social_media_agent.scheduler", level="INFO") as captured:
@@ -134,6 +137,7 @@ class PhaseTwoCoverageTests(unittest.TestCase):
         self.assertEqual(events[0]["target_count"], 1)
         self.assertEqual(events[2]["completed_count"], 1)
         self.assertEqual(events[2]["status"], "completed")
+        self.assertEqual(events[2]["generation_source"], "local")
         self.assertNotIn("private topic", "\n".join(record.getMessage() for record in captured.records))
 
     def test_scheduler_logs_failure_type_without_error_details(self) -> None:
@@ -582,6 +586,7 @@ class PhaseTwoCoverageTests(unittest.TestCase):
             "title": "",
             "description": "",
             "tags": [],
+            "generation_source": "local",
         }
 
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -596,6 +601,7 @@ class PhaseTwoCoverageTests(unittest.TestCase):
             self.assertEqual(len(output_files), 1)
             payload = json.loads(output_files[0].read_text(encoding="utf-8"))
             self.assertEqual(payload["caption"], "Example caption")
+            self.assertEqual(payload["generation_source"], "local")
             generator.generate_post.assert_called_once_with(topic="AI marketing", platform="instagram")
 
     def test_scheduler_job_state_persists_across_instances(self) -> None:

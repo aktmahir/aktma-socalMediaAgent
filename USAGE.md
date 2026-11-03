@@ -72,7 +72,7 @@ python app.py --topic "weekly marketing tip" --platform instagram --interval 1d 
 - Scheduled JSON files are written to `scheduled_posts/` by default; change this with `--scheduled-output`.
 - Job records are stored in SQLite at `scheduled_posts/scheduler.sqlite3` by default. Override the database with `--scheduler-db PATH`.
 - The scheduler validates interval seconds and count even when called directly.
-- Unexpected generator exceptions are retried up to 3 attempts with 1- and 2-second delays; after exhaustion the job is marked failed and the error remains in SQLite. Provider adapter failures that use the local fallback are treated as successful generation.
+- Unexpected generator exceptions are retried up to 3 attempts with 1- and 2-second delays; after exhaustion the job is marked failed and the error remains in SQLite. Provider/API/model failures currently use local template generation without an automatic provider retry, and the scheduled output JSON, console line, and lifecycle log identify the source as `local`. These fallback generations count as successful scheduled output; check `generation_source` when reviewing a generated file.
 
 Manage jobs from another terminal:
 

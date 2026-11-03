@@ -28,7 +28,7 @@ The regression suite covers provider success/failure paths, local fallback, sche
 - Scheduler job state is persisted, and web workers use daemon threads and stop with the web process. Jobs can be recovered manually or by running the opt-in `--supervise-scheduled` CLI supervisor; a Windows Task Scheduler registration script is available for current-user logon startup.
 - The Windows task is not registered automatically and starts only after the configured user signs in. Leases prevent concurrent workers per job within one SQLite database; they are not distributed coordination.
 - Once generated output is persisted, recovery replays it to the same file without calling the generator again. A process failure before payload persistence may still repeat the provider call.
-- Unexpected generator exceptions are retried up to three total attempts with 1- and 2-second delays; provider adapter fallback is treated as successful generation.
+- Unexpected generator exceptions are retried up to three total attempts with 1- and 2-second delays; provider/model failures use local fallback without automatic provider retries, are marked in scheduled JSON and lifecycle output, and count as successful generation.
 - Failed jobs can be retried explicitly with `--retry-job JOB_ID`; the command refuses jobs that are not failed.
 - Web uploads are limited to 5 MB and checked against allowlisted extensions, initial file signatures, and selected media type; random server names prevent path control and accidental overwrite. Files are not analyzed, fully parsed, or malware-scanned.
 - No authentication, CSRF protection, rate limiting, or production deployment pipeline is provided.

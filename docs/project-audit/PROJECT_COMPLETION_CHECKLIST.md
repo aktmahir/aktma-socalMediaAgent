@@ -29,7 +29,7 @@ This checklist reflects the current prototype status. Checked items are implemen
 - [x] Web validation errors and schedule-start messages have distinct accessible status styling and live-region announcements.
 - [x] Generated posts identify whether output came from the selected provider or the local template fallback.
 - [x] Bounded retry policy records failures and stops after three unexpected generator exceptions.
-- [ ] Provider/model outage policy beyond the existing local fallback behavior.
+- [x] Provider/model outage policy: retain local fallback without automatic provider retries, and clearly mark fallback source in CLI, web, scheduled JSON, and scheduler events.
 - [ ] Actual image/video analysis and content-aware generation.
 - [x] Web uploads enforce a 5 MB limit, allowlisted extensions, matching signatures and media type, and server-generated storage names.
 - [ ] Malware scanning, full media parsing, and actual image/video analysis.

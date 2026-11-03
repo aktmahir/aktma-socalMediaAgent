@@ -45,8 +45,8 @@ The project provides a small local workflow for generating social media content.
 - Uploaded media is not inspected or understood by the generator.
 - Signature checks only identify expected file headers; they do not fully parse files or scan for malware.
 - Web schedules use daemon-thread workers that stop when the process exits; the SQLite job remains and can be recovered with `--run-scheduled JOB_ID` or the opt-in `--supervise-scheduled` CLI command. Windows task registration is explicit and current-user scoped.
-- Leases prevent concurrent workers for one job in a shared SQLite database; separate databases are not coordinated. Unexpected generator exceptions are retried; adapter fallback results are treated as successful generation.
-- Provider failure fallback means a successful local result does not imply the external provider succeeded.
+- Leases prevent concurrent workers for one job in a shared SQLite database; separate databases are not coordinated. Unexpected generator exceptions are retried; provider/model failures use local fallback without automatic provider retries and count as successful generation. `generation_source` is included in scheduled JSON and supervisor output.
+- Provider failure fallback is surfaced as local output and does not imply the external provider succeeded.
 - There is no authentication or protection against repeated public requests; the web app is intended for local use.
 
 ## Functional conclusion
