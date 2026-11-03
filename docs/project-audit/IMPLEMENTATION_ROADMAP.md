@@ -55,10 +55,10 @@
 ## Phase 3 — Integration and Data Reliability
 
 ### ROAD-07 — Media upload processing
-- **Status:** Partially implemented; upload validation and lightweight local analysis.
-- **Description:** The web upload path enforces a 5 MB per-file limit, allowlisted extensions, matching image/video signatures and selected media type, one file per request, and random server-generated storage names. Images are decoded with Pillow for dimensions, orientation, approximate brightness, and coarse colors. Optional FFmpeg samples up to three low-resolution video frames for brightness, coarse colors, and visual change.
-- **Verification:** Regression coverage checks accepted decodable images, analyzer failures and upload cleanup, sampled video frames, and explicit unavailable-FFmpeg behavior, alongside upload signatures, sizes, and storage naming.
-- **Remaining:** This is not semantic image understanding, object/person/event recognition, malware scanning, or broad content validation. Video analysis requires FFmpeg installed on `PATH`.
+- **Status:** Partially implemented; upload validation, optional malware scanning, and bounded local parsing.
+- **Description:** The web upload path enforces a 5 MB per-file limit, allowlisted extensions, matching image/video signatures and selected media type, one file per request, and random server-generated storage names. Optional ClamAV scanning rejects detected files and labels unavailable/error scans as unscanned. Pillow reads image format, mode, animation/frame count, and basic visual measurements. FFprobe reads selected video container/stream metadata; FFmpeg samples up to three low-resolution frames.
+- **Verification:** Regression coverage checks clean/infected/unscanned scanner outcomes, infected-file removal, Pillow metadata, FFprobe metadata, sampled frames, parser/tool failures, and explicit upload cleanup.
+- **Remaining:** ClamAV is optional and must be separately installed and maintained; an unscanned result is not a safety guarantee. This is not comprehensive format validation, semantic image understanding, object/person/event recognition, malware protection when the scanner is unavailable, or broad content validation. Video inspection requires FFprobe and FFmpeg on `PATH`.
 
 ### ROAD-08 — Operational logging and monitoring
 - **Status:** Partially implemented.

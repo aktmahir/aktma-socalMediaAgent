@@ -32,7 +32,8 @@ This checklist reflects the current prototype status. Checked items are implemen
 - [x] Provider/model outage policy: retain local fallback without automatic provider retries, and clearly mark fallback source in CLI, web, scheduled JSON, and scheduler events.
 - [x] Lightweight local image/video analysis feeds objective visual observations into content generation; video sampling uses optional FFmpeg.
 - [x] Web uploads enforce a 5 MB limit, allowlisted extensions, matching signatures and media type, and server-generated storage names.
-- [ ] Malware scanning, semantic visual understanding, and full media parsing.
+- [x] Optional ClamAV scans reject detections and label uploads unscanned when ClamAV is unavailable or errors.
+- [ ] Comprehensive media parsing and semantic visual understanding.
 
 ## Security and operations
 

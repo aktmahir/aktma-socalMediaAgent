@@ -12,7 +12,7 @@ from werkzeug.exceptions import RequestEntityTooLarge
 from werkzeug.utils import secure_filename
 
 from .generator import SocialMediaPostGenerator
-from .media_analysis import MediaAnalysisError, analyze_media
+from .media_analysis import MediaAnalysisError, analyze_media, scan_for_malware
 from .observability import RequestMetrics, configure_logging, log_event
 from .scheduler import PeriodicPostScheduler, parse_count, parse_interval
 
@@ -252,11 +252,19 @@ def create_app() -> Flask:
                         values["media_type"],
                     )
                     stored_path = Path(app.config["UPLOAD_FOLDER"]) / stored_name
+                    analysis_complete = False
                     try:
+                        malware_scan = scan_for_malware(stored_path)
+                        if malware_scan["status"] == "infected":
+                            raise MediaAnalysisError(
+                                "The uploaded file was detected as malware and was rejected."
+                            )
                         media_analysis = analyze_media(stored_path, values["media_type"])
-                    except MediaAnalysisError:
-                        stored_path.unlink(missing_ok=True)
-                        raise
+                        media_analysis["malware_scan"] = malware_scan
+                        analysis_complete = True
+                    finally:
+                        if not analysis_complete:
+                            stored_path.unlink(missing_ok=True)
                     values["media_filename"] = stored_name
                 except ValueError as exc:
                     status_message = str(exc)

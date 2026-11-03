@@ -1,8 +1,10 @@
+import json
+import math
 import shutil
 import subprocess
 from collections import Counter
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from PIL import Image, ImageStat, UnidentifiedImageError
 
@@ -14,6 +16,31 @@ class MediaAnalysisError(ValueError):
 FRAME_SIZE = 64
 MAX_VIDEO_FRAMES = 3
 MAX_IMAGE_PIXELS = 20_000_000
+MAX_IMAGE_FRAMES_TO_INSPECT = 100
+MAX_TOTAL_IMAGE_FRAME_PIXELS = 80_000_000
+
+
+def scan_for_malware(path: Path) -> Dict[str, str]:
+    scanner_path = shutil.which("clamscan")
+    if scanner_path is None:
+        return {"status": "unscanned", "reason": "scanner_unavailable"}
+
+    try:
+        result = subprocess.run(
+            [scanner_path, "--no-summary", str(path)],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=30,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return {"status": "unscanned", "reason": "scanner_error"}
+
+    if result.returncode == 0:
+        return {"status": "clean"}
+    if result.returncode == 1:
+        return {"status": "infected"}
+    return {"status": "unscanned", "reason": "scanner_error"}
 
 
 def analyze_media(path: Path, media_type: str) -> Dict[str, object]:
@@ -28,12 +55,20 @@ def _analyze_image(path: Path) -> Dict[str, object]:
     try:
         with Image.open(path) as source:
             width, height = source.size
+            image_format = source.format or "unknown"
+            color_mode = source.mode
+            frame_duration_ms = source.info.get("duration")
             if width <= 0 or height <= 0 or width * height > MAX_IMAGE_PIXELS:
                 raise MediaAnalysisError(
                     "Image dimensions are too large for local analysis."
                 )
             image = source.convert("RGB")
             image.thumbnail((FRAME_SIZE, FRAME_SIZE))
+            frame_limit = min(
+                MAX_IMAGE_FRAMES_TO_INSPECT,
+                max(1, MAX_TOTAL_IMAGE_FRAME_PIXELS // (width * height)),
+            )
+            frame_count = _count_image_frames(source, frame_limit)
     except MediaAnalysisError:
         raise
     except (OSError, UnidentifiedImageError, Image.DecompressionBombError) as exc:
@@ -41,15 +76,30 @@ def _analyze_image(path: Path) -> Dict[str, object]:
             "The uploaded image could not be decoded for local analysis."
         ) from exc
 
-    return _describe_pixels(
+    result = _describe_pixels(
         image,
         media_type="image",
         width=width,
         height=height,
     )
+    result.update(
+        {
+            "format": image_format,
+            "color_mode": color_mode,
+            "frame_count": frame_count,
+            "frame_count_capped": frame_count == frame_limit,
+            "is_animated": (
+                True if frame_count > 1 else None if frame_count == frame_limit else False
+            ),
+        }
+    )
+    if isinstance(frame_duration_ms, (int, float)) and math.isfinite(frame_duration_ms):
+        result["first_frame_duration_ms"] = frame_duration_ms
+    return result
 
 
 def _analyze_video(path: Path) -> Dict[str, object]:
+    metadata = _probe_video(path)
     ffmpeg_path = shutil.which("ffmpeg")
     if ffmpeg_path is None:
         raise MediaAnalysisError(
@@ -126,6 +176,7 @@ def _analyze_video(path: Path) -> Dict[str, object]:
     )
     return {
         "media_type": "video",
+        **metadata,
         "frames_sampled": len(images),
         "sample_interval_seconds": 10,
         "brightness": brightness,
@@ -133,6 +184,106 @@ def _analyze_video(path: Path) -> Dict[str, object]:
         "visual_change": visual_change_label,
         "summary": summary,
     }
+
+
+def _probe_video(path: Path) -> Dict[str, object]:
+    ffprobe_path = shutil.which("ffprobe")
+    if ffprobe_path is None:
+        raise MediaAnalysisError(
+            "Video metadata analysis requires FFprobe installed and available on PATH."
+        )
+
+    command = [
+        ffprobe_path,
+        "-v",
+        "error",
+        "-show_entries",
+        "format=format_name,duration:stream=codec_type,codec_name,width,height,avg_frame_rate",
+        "-of",
+        "json",
+        str(path),
+    ]
+    try:
+        result = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=15,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise MediaAnalysisError(
+            "FFprobe could not inspect the uploaded video within the local time limit."
+        ) from exc
+
+    if result.returncode != 0:
+        raise MediaAnalysisError("The uploaded video metadata could not be parsed.")
+
+    try:
+        payload = json.loads(result.stdout)
+        if not isinstance(payload, dict):
+            raise ValueError("Unexpected FFprobe response shape.")
+        format_info = payload.get("format", {})
+        streams = payload.get("streams", [])
+        if not isinstance(format_info, dict) or not isinstance(streams, list):
+            raise ValueError("Unexpected FFprobe response shape.")
+        duration_value = _parse_duration(format_info.get("duration"))
+        video_streams = [
+            {
+                "codec": stream.get("codec_name", "unknown"),
+                "width": stream.get("width"),
+                "height": stream.get("height"),
+                "frame_rate": _parse_frame_rate(stream.get("avg_frame_rate")),
+            }
+            for stream in streams
+            if isinstance(stream, dict) and stream.get("codec_type") == "video"
+        ]
+        return {
+            "container": format_info.get("format_name", "unknown"),
+            "duration_seconds": duration_value,
+            "video_stream_count": len(video_streams),
+            "video_streams": video_streams[:8],
+            "audio_stream_count": sum(
+                1
+                for stream in streams
+                if isinstance(stream, dict) and stream.get("codec_type") == "audio"
+            ),
+        }
+    except (TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise MediaAnalysisError("The uploaded video metadata could not be parsed.") from exc
+
+
+def _count_image_frames(image: Image.Image, frame_limit: int) -> int:
+    frame_count = 0
+    for frame_index in range(frame_limit):
+        try:
+            image.seek(frame_index)
+        except EOFError:
+            break
+        frame_count += 1
+    image.seek(0)
+    return frame_count
+
+
+def _parse_frame_rate(value: object) -> Optional[float]:
+    if not isinstance(value, str) or "/" not in value:
+        return None
+    numerator, denominator = value.split("/", maxsplit=1)
+    try:
+        rate = float(numerator) / float(denominator)
+    except (ValueError, ZeroDivisionError):
+        return None
+    return round(rate, 3) if math.isfinite(rate) and rate > 0 else None
+
+
+def _parse_duration(value: object) -> Optional[float]:
+    if not isinstance(value, (str, int, float)):
+        return None
+    try:
+        duration = float(value)
+    except ValueError:
+        return None
+    return round(duration, 3) if math.isfinite(duration) and duration >= 0 else None
 
 
 def _describe_pixels(
