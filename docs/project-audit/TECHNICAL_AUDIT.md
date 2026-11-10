@@ -32,12 +32,12 @@ Remaining gaps:
 
 ## Reliability and observability
 
-Provider failures and API-level error responses are logged with fallback context. Web requests and scheduler lifecycle events also emit JSON records containing request/job IDs and non-sensitive status fields. `/metrics` exposes SQLite-persisted request counters and duration histograms; `/health` reports liveness, while `/ready` checks observability storage, upload storage, stable session-secret configuration, secure session cookies, disabled debug mode, and shared rate-limit storage. Unhandled web exceptions are logged with request-correlated tracebacks and saved as bounded, data-minimized SQLite error events. External error-reporting integrations and log retention remain deployment responsibilities.
+Provider failures and API-level error responses are logged with fallback context. Web requests and scheduler lifecycle events also emit JSON records containing request/job IDs and non-sensitive status fields. `/metrics` exposes SQLite-persisted request counters and duration histograms; `/health` reports liveness, while `/ready` checks observability storage, upload storage, stable session-secret configuration, secure session cookies, disabled debug mode, and shared rate-limit storage. Unhandled web exceptions are logged with request-correlated tracebacks and saved as bounded, data-minimized SQLite error events. Optional Sentry reporting is disabled without a DSN and strips request/user payloads, arbitrary messages, breadcrumbs, local variables, and source context; the project DSN and retention policy remain operator responsibilities.
 
 ## Security and deployment
 
-- Flask debug mode is disabled and the development server binds to localhost.
-- API keys are read from environment variables or `.env`; a dedicated secret-management and rotation process is not included.
+- Flask debug mode is disabled and the development server binds to `127.0.0.1`; a regression test protects this local-only default.
+- API keys and the stable Flask session key can be read from environment variables or `.env`; local key generation, private `.env` storage, and session invalidation on rotation are documented. A dedicated production secret-management and rotation process is not included.
 - There is no authentication or authorization. Flask-WTF protects form submissions with session-backed CSRF tokens; Flask-Limiter applies per-IP global and generation-route limits using process-local storage by default.
 - Upload checks match signatures, enforce bounded image/video parsing, and optionally scan with ClamAV. Uploaded files are limited to 5 MB and stored under random names outside Flask's static directory. ClamAV may be unavailable; parsing is not exhaustive, and external vision analysis is opt-in.
 - No production WSGI deployment configuration, container image, or CD deployment pipeline is provided. Liveness and readiness endpoints are available; a GitHub Actions CI workflow runs the test suite.

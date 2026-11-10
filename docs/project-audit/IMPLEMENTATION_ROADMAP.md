@@ -30,7 +30,7 @@
 - **Description:** Expand regression coverage to the scheduler and generator and run it automatically.
 - **Modules:** `tests/`, CI configuration.
 - **Current state:** `unittest` regression tests cover provider mocks and failures, scheduler output/recovery/supervision, and Flask generation and schedule submissions. GitHub Actions runs the suite on pushes and pull requests across Python 3.10–3.12.
-- **Verified:** The current suite discovers 81 tests. In the latest Windows run, 80 passed and one scheduler recovery test hit an intermittent SQLite temporary-directory cleanup race; that test passes when run alone. GitHub Actions passed all Python 3.10, 3.11, and 3.12 matrix jobs for commit `80d1215` (48 tests at that revision).
+- **Verified:** The current suite discovers 89 tests; the latest full Windows run passed all 89. The supervisor recovery test now waits for worker teardown before its temporary database is removed; it passed 25 consecutive focused runs. GitHub Actions passed all Python 3.10, 3.11, and 3.12 matrix jobs for commit `80d1215` (48 tests at that revision).
 - **Remaining:** Expand coverage as new features land.
 
 ### ROAD-05 — Persistent scheduling
@@ -62,8 +62,8 @@
 
 ### ROAD-08 — Operational logging and monitoring
 - **Status:** Partially implemented.
-- **Description:** Web requests and scheduler lifecycle events emit JSON log records with request/job IDs, status, duration, and safe error types; CLI/web entry points enable INFO logging. `/metrics` exposes SQLite-persisted Prometheus request counters and duration histograms with bounded method/status labels. Unhandled web exceptions are correlated to request IDs, logged with tracebacks, and stored as bounded, data-minimized SQLite events.
-- **Remaining:** External error reporting, log retention/rotation, alerting, and production log-sink configuration are not implemented. Prompts, credentials, file names, and output paths are excluded from structured records.
+- **Description:** Web requests and scheduler lifecycle events emit JSON log records with request/job IDs, status, duration, and safe error types; CLI/web entry points enable INFO logging. `/metrics` exposes SQLite-persisted Prometheus request counters and duration histograms with bounded method/status labels. Unhandled web exceptions are correlated to request IDs, logged with tracebacks, and stored as bounded, data-minimized SQLite events. Optional Sentry reporting is disabled unless `SENTRY_DSN` is configured; events are scrubbed before transmission.
+- **Remaining:** Log retention/rotation, alerting, and production log-sink configuration are not implemented. Sentry requires an approved project and explicit opt-in configuration. Prompts, credentials, file names, and request/user payloads are excluded from Sentry events and structured request/job records.
 
 ## Phase 4 — UX and Product Completeness
 

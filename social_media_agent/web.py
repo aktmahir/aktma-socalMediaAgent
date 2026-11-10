@@ -21,7 +21,9 @@ from .generator import SocialMediaPostGenerator
 from .media_analysis import MediaAnalysisError, analyze_media, scan_for_malware
 from .observability import (
     RequestMetrics,
+    capture_sentry_exception,
     configure_logging,
+    configure_sentry,
     log_event,
     log_exception_event,
 )
@@ -143,6 +145,8 @@ def create_app() -> Flask:
             "OBSERVABILITY_DB_PATH",
             str(Path.cwd() / "scheduled_posts" / "observability.sqlite3"),
         ),
+        SENTRY_DSN=os.environ.get("SENTRY_DSN", ""),
+        SENTRY_ENVIRONMENT=os.environ.get("SENTRY_ENVIRONMENT", "development"),
         RATELIMIT_HEADERS_ENABLED=True,
         SESSION_COOKIE_HTTPONLY=True,
         SESSION_COOKIE_SAMESITE="Lax",
@@ -157,6 +161,10 @@ def create_app() -> Flask:
     )
     csrf = CSRFProtect()
     csrf.init_app(app)
+    app.config["SENTRY_ENABLED"] = configure_sentry(
+        app.config["SENTRY_DSN"],
+        app.config["SENTRY_ENVIRONMENT"],
+    )
     UPLOAD_FOLDER.mkdir(parents=True, exist_ok=True)
     generator = SocialMediaPostGenerator()
     request_metrics = RequestMetrics(Path(app.config["OBSERVABILITY_DB_PATH"]))
@@ -292,6 +300,16 @@ def create_app() -> Flask:
             "error_type": type(error).__name__,
         }
         log_exception_event(logger, "http.unhandled_exception", **error_fields)
+        if app.config["SENTRY_ENABLED"]:
+            try:
+                capture_sentry_exception(error, request_id)
+            except Exception as reporting_error:
+                log_event(
+                    logger,
+                    "http.sentry_capture_failed",
+                    request_id=request_id,
+                    error_type=type(reporting_error).__name__,
+                )
         try:
             request_metrics.report_error(**error_fields)
         except sqlite3.Error as persistence_error:

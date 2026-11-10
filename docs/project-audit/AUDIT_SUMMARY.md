@@ -16,7 +16,7 @@ The project is a local Python prototype for generating social media content. It 
 
 | Roadmap task | Status | Current evidence |
 | --- | --- | --- |
-| ROAD-04: Automated tests and CI | Implemented; one intermittent local Windows test issue | Current suite discovers 81 tests; 80 passed in the latest run, while one scheduler recovery test hit an intermittent SQLite temporary-directory cleanup race and passed when run alone. GitHub Actions last passed all Python 3.10–3.12 jobs on commit `80d1215` (48 tests at that revision). |
+| ROAD-04: Automated tests and CI | Implemented; latest full local run passes | Current suite discovers 89 tests; the latest full Windows run passed all 89. The supervisor recovery test now waits for worker teardown before its temporary database is removed and passed 25 consecutive focused runs. GitHub Actions last passed all Python 3.10–3.12 jobs on commit `80d1215` (48 tests at that revision). |
 | ROAD-05: Persistent scheduling | Implemented for local use | SQLite persists jobs, retry attempts, and generated payloads; CLI supports inspection, pause/resume/cancel, manual recovery through `--run-scheduled JOB_ID`, and expiring leases to prevent concurrent workers. |
 
 The regression suite covers provider success/failure paths, local fallback, schedule parsing, job state persistence/recovery, output files, Flask generation/scheduling/upload validation, request metrics and structured logs, supervisor recovery/concurrency limits, readiness, error reporting, health liveness, and CLI errors. Tests do not make live network calls. [The GitHub Actions run for commit `80d1215` passed all three Python matrix jobs](https://github.com/aktmahir/aktma-socalMediaAgent/actions/runs/41709434848).
@@ -34,7 +34,7 @@ The regression suite covers provider success/failure paths, local fallback, sche
 - CSRF protection and per-IP rate limiting are implemented for the web routes. Authentication, shared limiter storage by default, and a production deployment pipeline are not provided.
 - Web validation errors and schedule-start messages now use distinct colors and accessible live-region announcements.
 - `GET /health` checks liveness; `GET /ready` checks metrics/upload storage, stable session-secret configuration, secure cookies, disabled debug mode, and shared rate-limit storage.
-- `GET /metrics` exposes request counters and duration histograms persisted in SQLite. Unhandled web exceptions are request-correlated, logged with tracebacks, and recorded as bounded, data-minimized SQLite events. External error-reporting integrations and log retention remain deployment responsibilities.
+- `GET /metrics` exposes request counters and duration histograms persisted in SQLite. Unhandled web exceptions are request-correlated, logged with tracebacks, and recorded as bounded, data-minimized SQLite events. Optional Sentry reporting sends scrubbed exception events only when a DSN is configured; project setup, log retention, and alerting remain deployment responsibilities.
 
 ## Recommended next steps
 

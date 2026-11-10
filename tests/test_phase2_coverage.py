@@ -10,14 +10,24 @@ import unittest
 from contextlib import redirect_stdout
 from io import BytesIO, StringIO
 from pathlib import Path
+from types import ModuleType, SimpleNamespace
 from unittest.mock import Mock, patch
 
 from PIL import Image
 
 import app as cli_module
-from social_media_agent.observability import RequestMetrics
+from social_media_agent.observability import (
+    RequestMetrics,
+    configure_sentry,
+    scrub_sentry_event,
+)
 from social_media_agent.scheduler import PeriodicPostScheduler
-from social_media_agent.web import MAX_UPLOAD_BYTES, _has_matching_signature, create_app
+from social_media_agent.web import (
+    MAX_UPLOAD_BYTES,
+    _has_matching_signature,
+    create_app,
+    main as web_main,
+)
 
 
 def _make_png() -> bytes:
@@ -50,7 +60,8 @@ class PhaseTwoCoverageTests(unittest.TestCase):
             {
                 "OBSERVABILITY_DB_PATH": str(
                     Path(self.observability_dir.name) / "observability.sqlite3"
-                )
+                ),
+                "SENTRY_DSN": "",
             },
         )
         self.observability_env.start()
@@ -84,6 +95,27 @@ class PhaseTwoCoverageTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.get_json(), {"status": "ok"})
+
+    def test_web_launcher_binds_to_localhost_without_debug_mode(self) -> None:
+        web_app = SimpleNamespace(run=Mock())
+        with patch("social_media_agent.web.configure_logging"), patch(
+            "social_media_agent.web.create_app",
+            return_value=web_app,
+        ):
+            web_main()
+
+        web_app.run.assert_called_once_with(debug=False, host="127.0.0.1", port=5000)
+
+    def test_configured_flask_secret_is_used_for_sessions(self) -> None:
+        secret_key = "a" * 64
+        with patch.dict(os.environ, {"FLASK_SECRET_KEY": secret_key}), patch(
+            "social_media_agent.web.SocialMediaPostGenerator",
+            return_value=Mock(),
+        ):
+            app = create_app()
+
+        self.assertEqual(app.config["SECRET_KEY"], secret_key)
+        self.assertTrue(app.config["PRODUCTION_SECRET_CONFIGURED"])
 
     def test_readiness_route_reports_failed_production_configuration(self) -> None:
         with patch.dict(
@@ -191,6 +223,165 @@ class PhaseTwoCoverageTests(unittest.TestCase):
             connection.close()
 
         self.assertEqual(retained, [("second",), ("third",)])
+
+    def test_sentry_is_disabled_without_a_dsn(self) -> None:
+        with patch("social_media_agent.observability.importlib.import_module") as importer:
+            self.assertFalse(configure_sentry("", "test"))
+        importer.assert_not_called()
+
+    def test_sentry_configuration_requires_optional_sdk_when_dsn_is_set(self) -> None:
+        with patch(
+            "social_media_agent.observability.importlib.import_module",
+            side_effect=ImportError("sentry-sdk is unavailable"),
+        ), self.assertRaisesRegex(RuntimeError, "sentry-sdk is not installed"):
+            configure_sentry("https://public@example.invalid/1", "test")
+
+    def test_sentry_exception_capture_adds_request_correlation_tag(self) -> None:
+        from contextlib import contextmanager
+
+        scope = SimpleNamespace(set_tag=Mock())
+        sentry_sdk = ModuleType("sentry_sdk")
+
+        @contextmanager
+        def new_scope():
+            yield scope
+
+        sentry_sdk.new_scope = new_scope
+        sentry_sdk.capture_exception = Mock()
+        error = RuntimeError("private exception details")
+        with patch.dict(sys.modules, {"sentry_sdk": sentry_sdk}):
+            from social_media_agent.observability import capture_sentry_exception
+
+            capture_sentry_exception(error, "request-123")
+
+        scope.set_tag.assert_called_once_with("request_id", "request-123")
+        sentry_sdk.capture_exception.assert_called_once_with(error)
+
+    def test_sentry_configuration_disables_pii_and_scrubs_event_payloads(self) -> None:
+        sentry_sdk = ModuleType("sentry_sdk")
+        sentry_sdk.init = Mock()
+        flask_integration = ModuleType("sentry_sdk.integrations.flask")
+        flask_integration.FlaskIntegration = Mock(return_value="flask-integration")
+        logging_integration = ModuleType("sentry_sdk.integrations.logging")
+        logging_integration.LoggingIntegration = Mock(return_value="logging-integration")
+        integrations = ModuleType("sentry_sdk.integrations")
+        integrations.flask = flask_integration
+        integrations.logging = logging_integration
+        modules = {
+            "sentry_sdk": sentry_sdk,
+            "sentry_sdk.integrations": integrations,
+            "sentry_sdk.integrations.flask": flask_integration,
+            "sentry_sdk.integrations.logging": logging_integration,
+        }
+
+        with patch.dict(sys.modules, modules):
+            self.assertTrue(configure_sentry("https://public@example.invalid/1", "test"))
+
+        options = sentry_sdk.init.call_args.kwargs
+        self.assertEqual(options["environment"], "test")
+        self.assertFalse(options["send_default_pii"])
+        self.assertFalse(options["include_source_context"])
+        self.assertFalse(options["include_local_variables"])
+        self.assertIs(options["before_send"], scrub_sentry_event)
+        self.assertEqual(
+            options["integrations"],
+            ["flask-integration", "logging-integration"],
+        )
+
+        event = {
+            "request": {"url": "https://example.invalid/?secret=value"},
+            "user": {"email": "private@example.invalid"},
+            "breadcrumbs": [{"message": "private breadcrumb"}],
+            "contexts": {"request": {"data": "private"}},
+            "extra": {"topic": "private topic"},
+            "message": "private exception message",
+            "logentry": {"message": "private log"},
+            "transaction": "/private/<path>",
+            "culprit": "/private/path",
+            "tags": {"request_id": "request-123", "user_id": "private-user"},
+            "exception": {
+                "values": [
+                    {
+                        "type": "RuntimeError",
+                        "value": "private exception message",
+                        "stacktrace": {
+                            "frames": [
+                                {
+                                    "filename": "C:\\private\\project\\web.py",
+                                    "abs_path": "C:\\private\\project\\web.py",
+                                    "vars": {"secret": "value"},
+                                    "context_line": "sensitive source",
+                                }
+                            ]
+                        },
+                    }
+                ]
+            },
+        }
+
+        scrubbed = scrub_sentry_event(event, {})
+
+        self.assertEqual(set(scrubbed), {"tags", "exception"})
+        self.assertEqual(scrubbed["tags"], {"request_id": "request-123"})
+        exception_value = scrubbed["exception"]["values"][0]
+        self.assertEqual(exception_value["value"], "RuntimeError")
+        self.assertEqual(
+            exception_value["stacktrace"]["frames"][0],
+            {"filename": "web.py"},
+        )
+
+    def test_sentry_captures_unhandled_web_exception_when_enabled(self) -> None:
+        with patch(
+            "social_media_agent.web.SocialMediaPostGenerator",
+            return_value=Mock(),
+        ), patch("social_media_agent.web.configure_sentry", return_value=True) as configure, patch(
+            "social_media_agent.web.capture_sentry_exception",
+        ) as capture:
+            app = create_app()
+
+            @app.get("/test-sentry-error")
+            def raise_sentry_error():
+                raise RuntimeError("private exception details")
+
+            response = app.test_client().get("/test-sentry-error")
+
+        self.assertEqual(response.status_code, 500)
+        self.assertIn("X-Request-ID", response.headers)
+        configure.assert_called_once_with("", "development")
+        capture.assert_called_once()
+        self.assertIsInstance(capture.call_args.args[0], RuntimeError)
+        self.assertEqual(capture.call_args.args[1], response.headers["X-Request-ID"])
+
+    def test_sentry_capture_failure_does_not_skip_local_error_reporting(self) -> None:
+        with patch(
+            "social_media_agent.web.SocialMediaPostGenerator",
+            return_value=Mock(),
+        ), patch("social_media_agent.web.configure_sentry", return_value=True), patch(
+            "social_media_agent.web.capture_sentry_exception",
+            side_effect=RuntimeError("remote transport detail"),
+        ):
+            app = create_app()
+
+            @app.get("/test-sentry-transport-error")
+            def raise_sentry_transport_error():
+                raise RuntimeError("application error")
+
+            with self.assertLogs("social_media_agent.web", level="INFO") as captured:
+                response = app.test_client().get("/test-sentry-transport-error")
+
+        connection = sqlite3.connect(app.config["OBSERVABILITY_DB_PATH"])
+        try:
+            error_count = connection.execute(
+                "SELECT COUNT(*) FROM application_errors"
+            ).fetchone()[0]
+        finally:
+            connection.close()
+
+        self.assertEqual(response.status_code, 500)
+        self.assertEqual(error_count, 1)
+        self.assertIn("http.sentry_capture_failed", "\n".join(captured.output))
+        self.assertIn("RuntimeError", "\n".join(captured.output))
+        self.assertNotIn("remote transport detail", "\n".join(captured.output))
 
     def test_unhandled_web_exceptions_are_reported_without_exposing_messages(self) -> None:
         with patch("social_media_agent.web.SocialMediaPostGenerator", return_value=Mock()):
@@ -873,14 +1064,24 @@ class PhaseTwoCoverageTests(unittest.TestCase):
                 count=1,
             )
 
-            self.assertEqual(scheduler.start_available_jobs(), 1)
-            deadline = time.monotonic() + 2
-            while time.monotonic() < deadline:
-                job = scheduler.list_jobs()[0]
-                if job["status"] == "completed":
-                    break
-                time.sleep(0.01)
+            worker_finished = threading.Event()
+            run_supervised_job = scheduler._run_supervised_job
 
+            def waitable_supervised_job(supervised_job_id: str) -> None:
+                try:
+                    run_supervised_job(supervised_job_id)
+                finally:
+                    worker_finished.set()
+
+            with patch.object(
+                scheduler,
+                "_run_supervised_job",
+                new=waitable_supervised_job,
+            ):
+                self.assertEqual(scheduler.start_available_jobs(), 1)
+                self.assertTrue(worker_finished.wait(timeout=2))
+
+            job = scheduler.list_jobs()[0]
             self.assertEqual(job["id"], job_id)
             self.assertEqual(job["status"], "completed")
             self.assertEqual(job["completed_count"], 1)

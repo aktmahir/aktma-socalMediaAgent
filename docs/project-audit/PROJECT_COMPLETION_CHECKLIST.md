@@ -25,7 +25,7 @@ This checklist reflects the current prototype status. Checked items are implemen
 - [x] Operators can explicitly retry a job after bounded generation retries are exhausted.
 - [x] Opt-in CLI supervisor scans persisted running jobs and recovers expired workers with a configurable concurrency limit.
 - [x] Optional Windows Task Scheduler registration script starts the supervisor at the current user's logon.
-- [x] Windows logon task is registered on this development machine; repeat per account/host when required.
+- [ ] Register the Windows logon task on each local account/host that needs unattended scheduler recovery.
 - [x] Web validation errors and schedule-start messages have distinct accessible status styling and live-region announcements.
 - [x] Generated posts identify whether output came from the selected provider or the local template fallback.
 - [x] Bounded retry policy records failures and stops after three unexpected generator exceptions.
@@ -42,9 +42,11 @@ This checklist reflects the current prototype status. Checked items are implemen
 - [ ] Authentication and authorization for any shared deployment.
 - [x] Session-backed CSRF protection and per-IP rate limiting for web routes (120 requests/hour globally; 10 POSTs/minute for generation/scheduling).
 - [ ] Production WSGI/server and deployment configuration.
-- [ ] Secret-management and rotation guidance beyond local `.env`.
+- [x] Local `.env` signing-key generation, storage, and session invalidation on rotation are documented.
+- [ ] Production secret-management and rotation beyond local `.env`.
 - [x] Application liveness endpoint, structured application/scheduler logs, and persistent request metrics.
 - [x] Production readiness endpoint, SQLite-persistent request metrics, and centralized local exception reporting with bounded error-event retention.
+- [x] Local web launcher binds to `127.0.0.1` with Flask debug mode disabled; regression-tested.
 - [x] CI workflow configured to run the regression suite.
 
 Jobs left running after process termination can be recovered manually with `--run-scheduled JOB_ID` or by running `--supervise-scheduled` after the 120-second lease expires. On Windows, `scripts/register-scheduler-supervisor.ps1` provides opt-in current-user logon startup; the task is not registered automatically. The lease is local to one SQLite database and is not a distributed or production-grade job service.

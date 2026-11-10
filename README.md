@@ -38,11 +38,27 @@ This project creates social media posts automatically using OpenAI, Hugging Face
 
 For OpenAI, select a model with the CLI `--openai-model` option. Hugging Face and Cohere use their provider-specific model environment variables, which can be overridden with `--provider-model`.
 
+For stable web sessions across restarts, generate a signing key and add it to `.env`:
+
+```bash
+python -c "import secrets; print(secrets.token_hex(32))"
+```
+
+Set `FLASK_SECRET_KEY` to the generated value. `.env` is ignored by Git; keep it private and do not paste it into logs or share it. Changing this key invalidates existing sessions and CSRF tokens. This local-file setup is not a production secret manager.
+
 5. Install the package locally (optional):
 
    ```bash
    pip install .
    ```
+
+For optional Sentry exception reporting, install the monitoring extra:
+
+```bash
+pip install ".[monitoring]"
+```
+
+Set `SENTRY_DSN` and optionally `SENTRY_ENVIRONMENT` in `.env` to enable sending unhandled web exceptions to your Sentry project. Reporting is disabled when no DSN is configured. Events omit request/user data, breadcrumbs, arbitrary messages, local variables, and source context; exception messages are replaced with the exception type. Review your organization's data policy before enabling an external service.
 
 ## Usage
 
@@ -119,11 +135,11 @@ Then open `http://127.0.0.1:5000` in your browser.
 The web UI includes scheduling controls for interval, post count, and output folder. When you submit a schedule, the app starts generating drafts in the background, stores the job in SQLite, and saves drafts under the selected output folder; it does not publish to a social network. The job ID is shown in the status message and can be managed with the CLI.
 Invalid topics, unsupported form selections, file types, counts, and intervals are rejected with status feedback. The scheduler itself also rejects non-positive intervals and negative counts.
 
-Web forms use session-backed CSRF tokens. Application routes are limited to 120 requests per hour per client IP, and generation/scheduling submissions are additionally limited to 10 POST requests per minute per IP; health, readiness, and metrics probes are exempt for reliable monitoring. The default limiter store is in-memory and process-local; set `RATELIMIT_STORAGE_URI` to a shared Flask-Limiter storage URI when running multiple workers. Set `FLASK_SECRET_KEY` to a stable, securely generated secret when session continuity across restarts is needed. These controls do not provide authentication or make the development server suitable for public deployment.
+Web forms use session-backed CSRF tokens. Application routes are limited to 120 requests per hour per client IP, and generation/scheduling submissions are additionally limited to 10 POST requests per minute per IP; health, readiness, and metrics probes are exempt for reliable monitoring. The default limiter store is in-memory and process-local; set `RATELIMIT_STORAGE_URI` to a shared Flask-Limiter storage URI when running multiple workers. The local `.env` setup above provides a stable session key; changing it invalidates existing sessions and CSRF tokens. These controls do not provide authentication or make the development server suitable for public deployment.
 
 `GET /health` is a liveness probe. `GET /ready` is a production-readiness probe that returns HTTP 503 unless the observability SQLite database and upload directory are writable, `FLASK_SECRET_KEY` is configured with at least 32 bytes, `SESSION_COOKIE_SECURE=true` is set, Flask debug mode is off, and rate limiting uses a healthy shared backend. It returns only check names and booleans. `/metrics` serves Prometheus counters and latency histograms persisted in SQLite across restarts. The database defaults to `scheduled_posts/observability.sqlite3` and can be changed with `OBSERVABILITY_DB_PATH`; `http_request_metrics` and `application_errors` are the metric/error-event tables.
 
-Unhandled web exceptions are associated with the response's `X-Request-ID`, recorded in the same SQLite database (up to 1,000 recent events), and logged with a traceback for local operational diagnosis. Persisted error records contain the request ID, method, route path, exception type, and timestamp—not exception messages, request bodies, or credentials. Configure access-controlled log collection and retention in the hosting environment; no external error-reporting service is contacted.
+Unhandled web exceptions are associated with the response's `X-Request-ID`, recorded in the same SQLite database (up to 1,000 recent events), and logged with a traceback for local operational diagnosis. Persisted error records contain the request ID, method, route path, exception type, and timestamp—not exception messages, request bodies, or credentials. Sentry reporting is optional and disabled without `SENTRY_DSN`; when enabled, an event scrubber removes request/user data, arbitrary messages, breadcrumbs, local variables, and source context before transmission. Configure access-controlled log collection and retention in the hosting environment.
 
 If the package is installed, use the console entry point:
 

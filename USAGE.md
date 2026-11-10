@@ -27,9 +27,25 @@ OPENAI_API_KEY=your_openai_api_key_here
 
 Hugging Face uses `HUGGINGFACE_API_KEY` and optionally `HUGGINGFACE_MODEL`. Cohere uses `COHERE_API_KEY` and optionally `COHERE_MODEL` (default: `command-a-03-2025`). The Cohere adapter uses the Cohere v2 Chat API. Choose the OpenAI model with `--openai-model`; `--provider-model` overrides the model for any selected provider. Do not commit real API keys.
 
+For stable web sessions across restarts, generate a signing key:
+
+```powershell
+python -c "import secrets; print(secrets.token_hex(32))"
+```
+
+Put the output in `.env` as `FLASK_SECRET_KEY=<generated-value>`. `.env` is ignored by Git; keep it private and do not paste secrets into logs or share them. Rotating this key invalidates existing sessions and CSRF tokens. This is local-file guidance, not production secret management.
+
 The web upload form includes a separate, unchecked-by-default option for semantic vision descriptions. Selecting it sends the uploaded image, or up to three sampled video frames, to OpenAI using `OPENAI_API_KEY`; it uses `OPENAI_VISION_MODEL` when set and otherwise `gpt-4o-mini`. This works independently of `AI_PROVIDER`. Without that explicit per-upload selection, media remains local and is not sent to an AI service.
 
 The app falls back to local generation when no provider key is configured or a provider request fails. Provider failures are logged. The CLI and web result identify local-template output so it is not mistaken for a response from the selected external provider. This fallback is useful for local development but does not confirm that an external provider is configured correctly.
+
+Optional Sentry reporting can be installed without adding the SDK to the default dependencies:
+
+```powershell
+pip install ".[monitoring]"
+```
+
+Set `SENTRY_DSN` in `.env` to enable it and optionally set `SENTRY_ENVIRONMENT` (defaults to `development`). If no DSN is configured, no Sentry SDK is imported and no external events are sent. Before transmission, events are scrubbed of request and user data, breadcrumbs, arbitrary messages, local variables, and source context; exception messages are replaced by the exception type. Review organizational data handling requirements before enabling Sentry.
 
 Optional: install the package to enable its console scripts:
 
@@ -129,7 +145,7 @@ The `http://127.0.0.1:5000/health` endpoint returns `{"status":"ok"}` when the F
 
 To pass readiness checks in a deployment, configure a stable `FLASK_SECRET_KEY` with at least 32 bytes, `SESSION_COOKIE_SECURE=true` when serving over HTTPS, and a healthy shared `RATELIMIT_STORAGE_URI` backend (the default `memory://` is intentionally not production-ready). Install and configure the selected Flask-Limiter storage backend for the deployment. These checks do not provide authentication or replace production WSGI/server configuration.
 
-Unexpected web exceptions return a generic message with an `X-Request-ID` reference. Full traceback details go to application logs; a bounded SQLite table stores only the timestamp, request ID, method, route path, and exception type. No external error-reporting service is configured.
+Unexpected web exceptions return a generic message with an `X-Request-ID` reference. Full traceback details go to application logs; a bounded SQLite table stores only the timestamp, request ID, method, route path, and exception type. When configured, Sentry receives scrubbed unhandled web exceptions with the request ID as a correlation tag; capture failures are logged while local reporting continues.
 
 ## 5. Uploads and media limitations
 

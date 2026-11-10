@@ -1,5 +1,6 @@
 from collections import defaultdict
 from datetime import datetime, timezone
+import importlib
 import json
 import logging
 import sqlite3
@@ -255,3 +256,100 @@ def log_exception_event(logger: logging.Logger, event: str, **fields: Any) -> No
         "%s",
         json.dumps({"event": event, **fields}, sort_keys=True, separators=(",", ":")),
     )
+
+
+def scrub_sentry_event(event: Dict[str, Any], _hint: Dict[str, Any]) -> Dict[str, Any]:
+    _ = _hint
+    safe_event_fields = {
+        "event_id",
+        "timestamp",
+        "platform",
+        "level",
+        "environment",
+        "sdk",
+        "tags",
+        "exception",
+    }
+    for field in tuple(event):
+        if field not in safe_event_fields:
+            event.pop(field)
+
+    tags = event.get("tags")
+    if isinstance(tags, dict):
+        event["tags"] = {
+            "request_id": tags["request_id"]
+        } if "request_id" in tags else {}
+    else:
+        event.pop("tags", None)
+
+    exception = event.get("exception")
+    if isinstance(exception, dict):
+        values = exception.get("values")
+        if isinstance(values, list):
+            for value in values:
+                if not isinstance(value, dict):
+                    continue
+                exception_type = value.get("type")
+                sanitized_value: Dict[str, Any] = {
+                    "type": exception_type or "Exception",
+                    "value": exception_type or "Unhandled exception",
+                }
+                stacktrace = value.get("stacktrace")
+                if isinstance(stacktrace, dict):
+                    frames = stacktrace.get("frames")
+                    if isinstance(frames, list):
+                        sanitized_frames = []
+                        for frame in frames:
+                            if not isinstance(frame, dict):
+                                continue
+                            sanitized_frame = {
+                                key: frame[key]
+                                for key in ("function", "lineno", "in_app")
+                                if key in frame
+                            }
+                            filename = frame.get("filename")
+                            if isinstance(filename, str):
+                                sanitized_frame["filename"] = filename.replace(
+                                    "\\", "/"
+                                ).rsplit("/", 1)[-1]
+                            sanitized_frames.append(sanitized_frame)
+                        sanitized_value["stacktrace"] = {"frames": sanitized_frames}
+                value.clear()
+                value.update(sanitized_value)
+    return event
+
+
+def configure_sentry(dsn: str, environment: str) -> bool:
+    if not dsn:
+        return False
+    try:
+        sentry_sdk = importlib.import_module("sentry_sdk")
+        flask_integration = importlib.import_module("sentry_sdk.integrations.flask")
+        logging_integration = importlib.import_module("sentry_sdk.integrations.logging")
+    except ImportError as error:
+        raise RuntimeError(
+            "Sentry reporting is enabled, but sentry-sdk is not installed. "
+            'Install the optional dependency with `pip install ".[monitoring]"`.'
+        ) from error
+
+    sentry_sdk.init(
+        dsn=dsn,
+        environment=environment,
+        integrations=[
+            flask_integration.FlaskIntegration(),
+            logging_integration.LoggingIntegration(level=None, event_level=None),
+        ],
+        send_default_pii=False,
+        include_source_context=False,
+        include_local_variables=False,
+        before_send=scrub_sentry_event,
+    )
+    return True
+
+
+def capture_sentry_exception(error: Exception, request_id: str) -> None:
+    sentry_sdk = importlib.import_module("sentry_sdk")
+
+    with sentry_sdk.new_scope() as scope:
+        scope.set_tag("request_id", request_id)
+        sentry_sdk.capture_exception(error)

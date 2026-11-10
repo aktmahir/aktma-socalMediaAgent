@@ -21,11 +21,21 @@ dependencies = [
   "python-dotenv>=1.0.0",
   "Pillow>=10.0.0,<12.0.0",
 ]
-urls = { "Homepage" = "https://github.com/aktma-socalMediaAgent" }
+
+[project.optional-dependencies]
+monitoring = [
+  "sentry-sdk>=2.0.0,<3.0.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/aktma-socalMediaAgent"
 
 [project.scripts]
 aktma-socalmediaagent = "app:main"
 aktma-socalmediaagent-web = "social_media_agent.web:main"
+
+[tool.setuptools]
+py-modules = ["app"]
 
 [tool.setuptools.packages.find]
 where = ["."]
