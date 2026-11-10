@@ -2,7 +2,7 @@
 
 ## Current status
 
-The project provides a small local workflow for generating social media content. It supports CLI and server-rendered Flask interfaces, external AI adapters, local fallback generation, file-name-based media context, and periodic JSON output. Phase 1 stabilizes provider request handling and rejects common invalid input. External provider integrations are covered by mocks, not live API calls.
+The project provides a small local workflow for generating social media content. It supports CLI and server-rendered Flask interfaces, external AI adapters, local fallback generation, bounded local image/video analysis, and periodic JSON output. Phase 1 stabilizes provider request handling and rejects common invalid input. External provider integrations are covered by mocks, not live API calls.
 
 ## Feature assessment
 
@@ -16,11 +16,11 @@ The project provides a small local workflow for generating social media content.
 | Local fallback | Implemented | Returns caption, hashtags, CTA, and YouTube metadata without an external provider. Output uses randomized templates. |
 | Web generation and scheduling | Implemented; route-tested | Flask test-client coverage exercises valid generation, invalid schedule feedback, and creation of a persisted scheduled job. |
 | Input validation | Implemented for core fields | CLI, web, and scheduler validate topic, selection values, file extensions/signatures, counts, and intervals. This is not comprehensive abuse protection. |
-| Upload support | Limited | Uploads are restricted to 5 MB, checked against allowlisted signatures and selected media type, and stored with random names. Contents are not processed, and no malware scanner is provided. |
+| Upload support | Partial | Uploads are restricted to 5 MB, checked against allowlisted signatures and media type, stored with random names, and parsed locally within image/video resource limits. ClamAV scanning is optional; OpenAI vision requires explicit per-upload opt-in. |
 | Scheduling | Implemented for local use | SQLite persists job configuration, status, progress, next-run time, failures, and output payloads. CLI supports lifecycle operations and opt-in supervision; a Windows script can register current-user logon startup. Per-job expiring leases prevent concurrent workers within the same database; unexpected generator exceptions receive up to three attempts. |
 | YouTube metadata | Implemented | Title, description, and tags are included in output; provider response parsing falls back when malformed. |
 | Automated tests | Implemented; CI configured | `python -m unittest discover -s tests -v`; Flask and scheduler coverage is included. GitHub Actions runs tests across Python 3.10–3.12. Provider integrations remain mocked. |
-| Production deployment | Missing | No production deployment, authentication, rate limiting, database, or operational readiness configuration. |
+| Production deployment | Missing | `/ready` verifies selected local dependencies and production settings, but no production server/deployment configuration or authentication is provided. Web routes use CSRF protection and per-IP rate limits; multi-worker deployments require shared limiter storage. |
 
 ## Phase 1 changes and verification
 
@@ -42,12 +42,12 @@ The project provides a small local workflow for generating social media content.
 ## Known limitations
 
 - The local generator is a template-based fallback, not an AI model.
-- Uploaded media is not inspected or understood by the generator.
-- Signature checks only identify expected file headers; they do not fully parse files or scan for malware.
+- Media is parsed locally for bounded metadata and visual observations; this is not exhaustive validation or semantic understanding. Optional OpenAI vision sends media externally only after per-upload opt-in.
+- Signature checks alone are insufficient; image/video parsers enforce additional format, decode, and resource limits. ClamAV scanning is optional and may leave an upload marked unscanned.
 - Web schedules use daemon-thread workers that stop when the process exits; the SQLite job remains and can be recovered with `--run-scheduled JOB_ID` or the opt-in `--supervise-scheduled` CLI command. Windows task registration is explicit and current-user scoped.
 - Leases prevent concurrent workers for one job in a shared SQLite database; separate databases are not coordinated. Unexpected generator exceptions are retried; provider/model failures use local fallback without automatic provider retries and count as successful generation. `generation_source` is included in scheduled JSON and supervisor output.
 - Provider failure fallback is surfaced as local output and does not imply the external provider succeeded.
-- There is no authentication or protection against repeated public requests; the web app is intended for local use.
+- There is no authentication. CSRF tokens protect form submissions and per-IP rate limits constrain request volume, but the web app is intended for local use; default limiter state is process-local.
 
 ## Functional conclusion
 

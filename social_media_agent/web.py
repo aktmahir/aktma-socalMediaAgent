@@ -1,19 +1,30 @@
 import logging
 import os
+import secrets
+import sqlite3
 import tempfile
-import threading
 import time
 import uuid
 from pathlib import Path
+from threading import Thread
+from typing import Callable
 
 from flask import Flask, Response, g, jsonify, render_template, request
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
+from flask_wtf.csrf import CSRFError, CSRFProtect
 from werkzeug.datastructures import FileStorage
-from werkzeug.exceptions import RequestEntityTooLarge
+from werkzeug.exceptions import HTTPException, RequestEntityTooLarge
 from werkzeug.utils import secure_filename
 
 from .generator import SocialMediaPostGenerator
 from .media_analysis import MediaAnalysisError, analyze_media, scan_for_malware
-from .observability import RequestMetrics, configure_logging, log_event
+from .observability import (
+    RequestMetrics,
+    configure_logging,
+    log_event,
+    log_exception_event,
+)
 from .scheduler import PeriodicPostScheduler, parse_count, parse_interval
 
 logger = logging.getLogger(__name__)
@@ -119,11 +130,36 @@ def _save_uploaded_media(
 
 def create_app() -> Flask:
     app = Flask(__name__, template_folder="templates")
+    configured_secret = os.environ.get("FLASK_SECRET_KEY", "")
+    limiter_storage_uri = os.environ.get("RATELIMIT_STORAGE_URI", "memory://")
+    app.config.update(
+        SECRET_KEY=configured_secret or secrets.token_hex(32),
+        PRODUCTION_SECRET_CONFIGURED=len(configured_secret.encode("utf-8")) >= 32,
+        RATELIMIT_STORAGE_URI=limiter_storage_uri,
+        RATELIMIT_SHARED_STORAGE=not limiter_storage_uri.startswith("memory://"),
+        SESSION_COOKIE_SECURE=os.environ.get("SESSION_COOKIE_SECURE", "").lower()
+        in {"1", "true", "yes"},
+        OBSERVABILITY_DB_PATH=os.environ.get(
+            "OBSERVABILITY_DB_PATH",
+            str(Path.cwd() / "scheduled_posts" / "observability.sqlite3"),
+        ),
+        RATELIMIT_HEADERS_ENABLED=True,
+        SESSION_COOKIE_HTTPONLY=True,
+        SESSION_COOKIE_SAMESITE="Lax",
+    )
     app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
     app.config["MAX_CONTENT_LENGTH"] = MAX_REQUEST_BYTES
+    limiter = Limiter(
+        key_func=get_remote_address,
+        app=app,
+        default_limits=["120 per hour"],
+        storage_uri=app.config["RATELIMIT_STORAGE_URI"],
+    )
+    csrf = CSRFProtect()
+    csrf.init_app(app)
     UPLOAD_FOLDER.mkdir(parents=True, exist_ok=True)
     generator = SocialMediaPostGenerator()
-    request_metrics = RequestMetrics()
+    request_metrics = RequestMetrics(Path(app.config["OBSERVABILITY_DB_PATH"]))
 
     def default_form_values():
         return {
@@ -152,11 +188,19 @@ def create_app() -> Flask:
             response.headers["X-Request-ID"] = request_id
             duration_ms = round((time.perf_counter() - g.request_started_at) * 1000, 2)
             if request.path != "/metrics":
-                request_metrics.observe_request(
-                    request.method,
-                    response.status_code,
-                    duration_ms / 1000,
-                )
+                try:
+                    request_metrics.observe_request(
+                        request.method,
+                        response.status_code,
+                        duration_ms / 1000,
+                    )
+                except sqlite3.Error as error:
+                    log_event(
+                        logger,
+                        "http.metrics_persist_failed",
+                        request_id=request_id,
+                        error_type=type(error).__name__,
+                    )
                 log_event(
                     logger,
                     "http.request",
@@ -169,6 +213,7 @@ def create_app() -> Flask:
         return response
 
     @app.get("/metrics")
+    @limiter.exempt
     def metrics() -> Response:
         return Response(
             request_metrics.render_prometheus(),
@@ -176,8 +221,44 @@ def create_app() -> Flask:
         )
 
     @app.get("/health")
+    @limiter.exempt
     def health() -> Response:
         return jsonify(status="ok")
+
+    @app.get("/ready")
+    @limiter.exempt
+    def readiness() -> Response:
+        def check(name: str, operation: Callable[[], bool]) -> bool:
+            try:
+                return bool(operation())
+            except Exception as error:
+                log_event(
+                    logger,
+                    "readiness.check_failed",
+                    check=name,
+                    error_type=type(error).__name__,
+                )
+                return False
+
+        def upload_storage_is_writable() -> bool:
+            with tempfile.TemporaryFile(dir=app.config["UPLOAD_FOLDER"]):
+                return True
+
+        checks = {
+            "metrics_storage": check("metrics_storage", request_metrics.check_storage),
+            "upload_storage": check("upload_storage", upload_storage_is_writable),
+            "session_secret": bool(app.config["PRODUCTION_SECRET_CONFIGURED"]),
+            "secure_session_cookie": bool(app.config["SESSION_COOKIE_SECURE"]),
+            "debug_mode_disabled": not app.debug,
+            "shared_rate_limit_storage": bool(
+                app.config["RATELIMIT_SHARED_STORAGE"]
+                and check("shared_rate_limit_storage", limiter.storage.check)
+            ),
+        }
+        ready = all(checks.values())
+        return jsonify(status="ready" if ready else "not_ready", checks=checks), (
+            200 if ready else 503
+        )
 
     @app.errorhandler(RequestEntityTooLarge)
     def handle_request_too_large(_error: RequestEntityTooLarge):
@@ -194,7 +275,40 @@ def create_app() -> Flask:
             languages=LANGUAGES,
         ), _error.code or 413
 
+    @app.errorhandler(CSRFError)
+    def handle_csrf_error(_error: CSRFError):
+        return "The form security token is missing or invalid. Reload the page and try again.", 400
+
+    @app.errorhandler(Exception)
+    def handle_unexpected_error(error: Exception):
+        if isinstance(error, HTTPException):
+            return error.get_response()
+
+        request_id = getattr(g, "request_id", uuid.uuid4().hex)
+        error_fields = {
+            "request_id": request_id,
+            "method": request.method,
+            "path": request.path,
+            "error_type": type(error).__name__,
+        }
+        log_exception_event(logger, "http.unhandled_exception", **error_fields)
+        try:
+            request_metrics.report_error(**error_fields)
+        except sqlite3.Error as persistence_error:
+            log_event(
+                logger,
+                "http.error_persist_failed",
+                request_id=request_id,
+                error_type=type(persistence_error).__name__,
+            )
+        return (
+            f"An unexpected error occurred. Reference: {request_id}",
+            500,
+            {"Content-Type": "text/plain; charset=utf-8"},
+        )
+
     @app.route("/", methods=["GET", "POST"])
+    @limiter.limit("10 per minute", methods=["POST"], override_defaults=False)
     def index():
         post = None
         values = default_form_values()
@@ -302,7 +416,7 @@ def create_app() -> Flask:
                     interval_seconds=interval_seconds,
                     count=values["count"],
                 )
-                thread = threading.Thread(
+                thread = Thread(
                     target=scheduler.run_scheduled_job,
                     kwargs={"job_id": job_id},
                     daemon=True,

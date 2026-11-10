@@ -40,11 +40,11 @@ This checklist reflects the current prototype status. Checked items are implemen
 ## Security and operations
 
 - [ ] Authentication and authorization for any shared deployment.
-- [ ] CSRF protection and rate limiting for web routes.
+- [x] Session-backed CSRF protection and per-IP rate limiting for web routes (120 requests/hour globally; 10 POSTs/minute for generation/scheduling).
 - [ ] Production WSGI/server and deployment configuration.
 - [ ] Secret-management and rotation guidance beyond local `.env`.
-- [x] Application liveness endpoint, structured application/scheduler logs, and in-process request metrics.
-- [ ] Production readiness checks, persistent metrics, and centralized error reporting.
+- [x] Application liveness endpoint, structured application/scheduler logs, and persistent request metrics.
+- [x] Production readiness endpoint, SQLite-persistent request metrics, and centralized local exception reporting with bounded error-event retention.
 - [x] CI workflow configured to run the regression suite.
 
 Jobs left running after process termination can be recovered manually with `--run-scheduled JOB_ID` or by running `--supervise-scheduled` after the 120-second lease expires. On Windows, `scripts/register-scheduler-supervisor.ps1` provides opt-in current-user logon startup; the task is not registered automatically. The lease is local to one SQLite database and is not a distributed or production-grade job service.

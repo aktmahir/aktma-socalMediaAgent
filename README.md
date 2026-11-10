@@ -119,6 +119,12 @@ Then open `http://127.0.0.1:5000` in your browser.
 The web UI includes scheduling controls for interval, post count, and output folder. When you submit a schedule, the app starts generating drafts in the background, stores the job in SQLite, and saves drafts under the selected output folder; it does not publish to a social network. The job ID is shown in the status message and can be managed with the CLI.
 Invalid topics, unsupported form selections, file types, counts, and intervals are rejected with status feedback. The scheduler itself also rejects non-positive intervals and negative counts.
 
+Web forms use session-backed CSRF tokens. Application routes are limited to 120 requests per hour per client IP, and generation/scheduling submissions are additionally limited to 10 POST requests per minute per IP; health, readiness, and metrics probes are exempt for reliable monitoring. The default limiter store is in-memory and process-local; set `RATELIMIT_STORAGE_URI` to a shared Flask-Limiter storage URI when running multiple workers. Set `FLASK_SECRET_KEY` to a stable, securely generated secret when session continuity across restarts is needed. These controls do not provide authentication or make the development server suitable for public deployment.
+
+`GET /health` is a liveness probe. `GET /ready` is a production-readiness probe that returns HTTP 503 unless the observability SQLite database and upload directory are writable, `FLASK_SECRET_KEY` is configured with at least 32 bytes, `SESSION_COOKIE_SECURE=true` is set, Flask debug mode is off, and rate limiting uses a healthy shared backend. It returns only check names and booleans. `/metrics` serves Prometheus counters and latency histograms persisted in SQLite across restarts. The database defaults to `scheduled_posts/observability.sqlite3` and can be changed with `OBSERVABILITY_DB_PATH`; `http_request_metrics` and `application_errors` are the metric/error-event tables.
+
+Unhandled web exceptions are associated with the response's `X-Request-ID`, recorded in the same SQLite database (up to 1,000 recent events), and logged with a traceback for local operational diagnosis. Persisted error records contain the request ID, method, route path, exception type, and timestamp—not exception messages, request bodies, or credentials. Configure access-controlled log collection and retention in the hosting environment; no external error-reporting service is contacted.
+
 If the package is installed, use the console entry point:
 
 ```bash
@@ -127,7 +133,7 @@ aktma-socalmediaagent-web
 
 ## Upload support
 
-The web UI accepts allowlisted image and video uploads up to 5 MB each. It checks that the file's initial signature matches the extension and selected media type, then stores it under a random server-generated name to prevent path control and accidental overwrites. Uploaded content is not served or analyzed, and file bytes are not sent to providers. These basic signature checks are not a full parser or malware scan; the upload workflow is intended for local use, not public exposure.
+The Web UI accepts allowlisted image and video uploads up to 5 MB each. It checks that the file's initial signature matches the extension and selected media type, then stores it under a random server-generated name to prevent path control and accidental overwrites. Images and videos are parsed locally for bounded format, metadata, and visual observations; ClamAV scanning is optional and may report files as unscanned. By default, file bytes are not sent to providers. The explicit OpenAI vision opt-in described above sends an image or sampled video frames externally. These checks are not exhaustive validation or a safety guarantee; the upload workflow is intended for local use, not public exposure.
 
 Supported media types:
 - `text`

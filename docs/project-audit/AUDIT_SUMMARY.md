@@ -16,10 +16,10 @@ The project is a local Python prototype for generating social media content. It 
 
 | Roadmap task | Status | Current evidence |
 | --- | --- | --- |
-| ROAD-04: Automated tests and CI | Implemented; locally and remotely verified | 49 `unittest` cases pass locally; GitHub Actions run 4 passed on Python 3.10, 3.11, and 3.12 for commit `80d1215` (48 tests at that revision). |
+| ROAD-04: Automated tests and CI | Implemented; one intermittent local Windows test issue | Current suite discovers 81 tests; 80 passed in the latest run, while one scheduler recovery test hit an intermittent SQLite temporary-directory cleanup race and passed when run alone. GitHub Actions last passed all Python 3.10–3.12 jobs on commit `80d1215` (48 tests at that revision). |
 | ROAD-05: Persistent scheduling | Implemented for local use | SQLite persists jobs, retry attempts, and generated payloads; CLI supports inspection, pause/resume/cancel, manual recovery through `--run-scheduled JOB_ID`, and expiring leases to prevent concurrent workers. |
 
-The regression suite covers provider success/failure paths, local fallback, schedule parsing, job state persistence/recovery, output files, Flask generation/scheduling/upload validation, request metrics and structured logs, supervisor recovery/concurrency limits, health liveness, and CLI errors. Tests do not make live network calls. [The GitHub Actions run for commit `80d1215` passed all three Python matrix jobs](https://github.com/aktmahir/aktma-socalMediaAgent/actions/runs/41709434848).
+The regression suite covers provider success/failure paths, local fallback, schedule parsing, job state persistence/recovery, output files, Flask generation/scheduling/upload validation, request metrics and structured logs, supervisor recovery/concurrency limits, readiness, error reporting, health liveness, and CLI errors. Tests do not make live network calls. [The GitHub Actions run for commit `80d1215` passed all three Python matrix jobs](https://github.com/aktmahir/aktma-socalMediaAgent/actions/runs/41709434848).
 
 ## Remaining risks and limitations
 
@@ -30,11 +30,11 @@ The regression suite covers provider success/failure paths, local fallback, sche
 - Once generated output is persisted, recovery replays it to the same file without calling the generator again. A process failure before payload persistence may still repeat the provider call.
 - Unexpected generator exceptions are retried up to three total attempts with 1- and 2-second delays; provider/model failures use local fallback without automatic provider retries, are marked in scheduled JSON and lifecycle output, and count as successful generation.
 - Failed jobs can be retried explicitly with `--retry-job JOB_ID`; the command refuses jobs that are not failed.
-- Web uploads are limited to 5 MB and checked against allowlisted extensions, initial file signatures, and selected media type; random server names prevent path control and accidental overwrite. Files are not analyzed, fully parsed, or malware-scanned.
-- No authentication, CSRF protection, rate limiting, or production deployment pipeline is provided.
+- Web uploads are limited to 5 MB, checked against allowlisted extensions/signatures and selected media type, stored under random names, and boundedly parsed locally. ClamAV scanning is optional; semantic vision sends images or sampled video frames to OpenAI only after explicit opt-in.
+- CSRF protection and per-IP rate limiting are implemented for the web routes. Authentication, shared limiter storage by default, and a production deployment pipeline are not provided.
 - Web validation errors and schedule-start messages now use distinct colors and accessible live-region announcements.
-- `GET /health` checks application liveness only; it does not verify dependencies or readiness.
-- JSON request/job lifecycle logs are emitted at INFO by CLI/web entry points. `GET /metrics` exposes in-process request counters and duration histograms, but metrics reset on restart; centralized exception reporting, log retention, and production log-sink configuration are not implemented.
+- `GET /health` checks liveness; `GET /ready` checks metrics/upload storage, stable session-secret configuration, secure cookies, disabled debug mode, and shared rate-limit storage.
+- `GET /metrics` exposes request counters and duration histograms persisted in SQLite. Unhandled web exceptions are request-correlated, logged with tracebacks, and recorded as bounded, data-minimized SQLite events. External error-reporting integrations and log retention remain deployment responsibilities.
 
 ## Recommended next steps
 

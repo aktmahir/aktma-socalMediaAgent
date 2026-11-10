@@ -19,7 +19,7 @@ The project is a Python application for generating social media content from a t
 - Offers a CLI (`app.py`) and a local Flask interface (`web.py`).
 - Saves generated posts as JSON files and persists schedule configuration/progress in SQLite.
 - Provides CLI commands to inspect, pause, resume, cancel, manually recover, and supervise persisted scheduled jobs.
-- Accepts allowlisted web uploads up to 5 MB with basic signature checks and random server-generated storage names; media contents are not analyzed.
+- Accepts allowlisted web uploads up to 5 MB with signature checks, random server-generated names, bounded local image/video parsing, optional ClamAV scanning, and explicit opt-in OpenAI vision descriptions.
 
 ## Architecture
 
@@ -48,8 +48,8 @@ Set `AI_PROVIDER` to `openai`, `huggingface`, or `cohere` and configure the corr
 
 Generated posts are returned as dictionaries or written as JSON files. Scheduled job records use SQLite (default: `scheduled_posts/scheduler.sqlite3`), while workers remain process-local. SQLite leases prevent overlapping workers for the same job; the CLI offers manual recovery and an opt-in supervisor that scans persisted running jobs. Unexpected generator exceptions are retried up to three times. Windows users can register current-user logon startup through `scripts/register-scheduler-supervisor.ps1`; registration is an explicit action, not part of installation. There is no cross-database coordination. Uploaded files are stored under `uploads/`.
 
-The web runner binds to localhost with Flask debug disabled. This is not a production deployment configuration; there is no authentication, authorization, CSRF protection, rate limiting, or production server setup.
+The web runner binds to localhost with Flask debug disabled. Forms use session-backed CSRF tokens, and application routes have per-IP rate limits. Health and monitoring probes are exempt; the default limiter storage is process-local. Request metrics and bounded web exception events persist in `scheduled_posts/observability.sqlite3`; `/ready` checks local storage and required production settings. This is not a production deployment configuration; authentication, authorization, and production server setup are absent.
 
 ## Current status
 
-Phase 1 provider compatibility, request error handling, and core CLI/web/scheduler validation are implemented with regression tests. Phase 2 adds CI, Flask route coverage, SQLite-backed local job lifecycle controls, worker leases, bounded generation retries, and an opt-in local scheduler supervisor. Live provider smoke tests, automatic supervisor startup, richer media processing, multi-user access, and deployment hardening remain future work.
+Phase 1 provider compatibility, request error handling, and core CLI/web/scheduler validation are implemented with regression tests. Phase 2 adds CI, Flask route coverage, SQLite-backed local job lifecycle controls, worker leases, bounded generation retries, persistent request metrics, local centralized exception reporting, readiness checks, and an opt-in local scheduler supervisor. Live provider smoke tests, automatic supervisor startup, richer media processing, multi-user access, and production deployment hardening remain future work.

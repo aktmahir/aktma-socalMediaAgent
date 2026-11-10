@@ -22,7 +22,7 @@ This architecture remains appropriate for a local prototype. Job state is durabl
 
 ## Input and scheduling
 
-The CLI and web app validate required topics and allowed choices. Interval/count parsing is shared in `scheduler.py`; the scheduler also guards its direct-call arguments. Web uploads have a 5 MB cap, allowlisted extensions/signature checks, and user-visible validation errors.
+The CLI and web app validate required topics and allowed choices. Interval/count parsing is shared in `scheduler.py`; the scheduler also guards its direct-call arguments. Web uploads have a 5 MB cap, allowlisted extensions/signature checks, bounded local image/video parsing, optional malware scanning, and user-visible validation errors.
 
 Remaining gaps:
 
@@ -32,15 +32,15 @@ Remaining gaps:
 
 ## Reliability and observability
 
-Provider failures and API-level error responses are logged with fallback context. Web requests and scheduler lifecycle events also emit JSON records containing request/job IDs and non-sensitive status fields. `/metrics` exposes in-process request counters and duration histograms, and `/health` reports application liveness only. Tracing, log retention, and centralized error reporting are not implemented.
+Provider failures and API-level error responses are logged with fallback context. Web requests and scheduler lifecycle events also emit JSON records containing request/job IDs and non-sensitive status fields. `/metrics` exposes SQLite-persisted request counters and duration histograms; `/health` reports liveness, while `/ready` checks observability storage, upload storage, stable session-secret configuration, secure session cookies, disabled debug mode, and shared rate-limit storage. Unhandled web exceptions are logged with request-correlated tracebacks and saved as bounded, data-minimized SQLite error events. External error-reporting integrations and log retention remain deployment responsibilities.
 
 ## Security and deployment
 
 - Flask debug mode is disabled and the development server binds to localhost.
 - API keys are read from environment variables or `.env`; a dedicated secret-management and rotation process is not included.
-- There is no authentication, authorization, CSRF protection, or rate limiting.
-- Upload checks match basic signatures to extensions and selected media type, but do not fully parse files or scan for malware. Uploaded files are limited to 5 MB and stored under random names outside Flask's static directory.
-- No production WSGI deployment configuration, container image, CD deployment pipeline, or health/readiness endpoints are provided. A GitHub Actions CI workflow runs the test suite.
+- There is no authentication or authorization. Flask-WTF protects form submissions with session-backed CSRF tokens; Flask-Limiter applies per-IP global and generation-route limits using process-local storage by default.
+- Upload checks match signatures, enforce bounded image/video parsing, and optionally scan with ClamAV. Uploaded files are limited to 5 MB and stored under random names outside Flask's static directory. ClamAV may be unavailable; parsing is not exhaustive, and external vision analysis is opt-in.
+- No production WSGI deployment configuration, container image, or CD deployment pipeline is provided. Liveness and readiness endpoints are available; a GitHub Actions CI workflow runs the test suite.
 
 ## Build and verification status
 

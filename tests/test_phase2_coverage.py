@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import sqlite3
 import sys
 import threading
@@ -26,7 +27,57 @@ def _make_png() -> bytes:
     return output.getvalue()
 
 
+def _post_with_csrf(client, *args, **kwargs):
+    page = client.get("/")
+    match = re.search(
+        r'<input type="hidden" name="csrf_token" value="([^"]+)"',
+        page.get_data(as_text=True),
+    )
+    if match is None:
+        raise AssertionError("The web form did not contain a CSRF token.")
+    data = dict(kwargs.get("data") or {})
+    data["csrf_token"] = match.group(1)
+    kwargs["data"] = data
+    return client.post(*args, **kwargs)
+
+
 class PhaseTwoCoverageTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.observability_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.observability_dir.cleanup)
+        self.observability_env = patch.dict(
+            os.environ,
+            {
+                "OBSERVABILITY_DB_PATH": str(
+                    Path(self.observability_dir.name) / "observability.sqlite3"
+                )
+            },
+        )
+        self.observability_env.start()
+        self.addCleanup(self.observability_env.stop)
+
+    def test_web_form_includes_csrf_token_and_rejects_missing_token(self) -> None:
+        with patch("social_media_agent.web.SocialMediaPostGenerator", return_value=Mock()):
+            client = create_app().test_client()
+            page = client.get("/")
+            response = client.post("/", data={"topic": "AI marketing"})
+
+        self.assertEqual(page.status_code, 200)
+        self.assertRegex(page.get_data(as_text=True), r'name="csrf_token" value="[^"]+"')
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("security token", response.get_data(as_text=True))
+
+    def test_web_rate_limits_generation_posts_per_client_ip(self) -> None:
+        with patch("social_media_agent.web.SocialMediaPostGenerator", return_value=Mock()):
+            client = create_app().test_client()
+            responses = [
+                _post_with_csrf(client, "/", data={"topic": ""})
+                for _ in range(11)
+            ]
+
+        self.assertTrue(all(response.status_code == 200 for response in responses[:10]))
+        self.assertEqual(responses[-1].status_code, 429)
+
     def test_health_route_reports_application_liveness(self) -> None:
         with patch("social_media_agent.web.SocialMediaPostGenerator", return_value=Mock()):
             response = create_app().test_client().get("/health")
@@ -34,12 +85,48 @@ class PhaseTwoCoverageTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.get_json(), {"status": "ok"})
 
+    def test_readiness_route_reports_failed_production_configuration(self) -> None:
+        with patch.dict(
+            os.environ,
+            {"FLASK_SECRET_KEY": "", "RATELIMIT_STORAGE_URI": "memory://"},
+        ), patch("social_media_agent.web.SocialMediaPostGenerator", return_value=Mock()):
+            response = create_app().test_client().get("/ready")
+
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(
+            response.get_json(),
+            {
+                "status": "not_ready",
+                "checks": {
+                    "metrics_storage": True,
+                    "upload_storage": True,
+                    "session_secret": False,
+                    "secure_session_cookie": False,
+                    "debug_mode_disabled": True,
+                    "shared_rate_limit_storage": False,
+                },
+            },
+        )
+
+    def test_readiness_route_returns_ready_when_required_dependencies_are_healthy(self) -> None:
+        with patch("social_media_agent.web.SocialMediaPostGenerator", return_value=Mock()):
+            app = create_app()
+        limiter = next(iter(app.extensions["limiter"]))
+        app.config["PRODUCTION_SECRET_CONFIGURED"] = True
+        app.config["SESSION_COOKIE_SECURE"] = True
+        app.config["RATELIMIT_SHARED_STORAGE"] = True
+        with patch.object(limiter.storage, "check", return_value=True):
+            response = app.test_client().get("/ready")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json()["status"], "ready")
+        self.assertTrue(all(response.get_json()["checks"].values()))
+
     def test_metrics_route_reports_request_count_and_latency_without_scrape_counts(self) -> None:
         with patch("social_media_agent.web.SocialMediaPostGenerator", return_value=Mock()):
             app = create_app()
             client = app.test_client()
-            client.get("/")
-            client.post("/", data={"topic": ""})
+            _post_with_csrf(client, "/", data={"topic": ""})
 
             first_metrics_response = client.get("/metrics")
             first_metrics = first_metrics_response.get_data(as_text=True)
@@ -69,6 +156,66 @@ class PhaseTwoCoverageTests(unittest.TestCase):
         self.assertEqual(first_metrics, second_metrics)
         self.assertNotIn("/metrics", first_metrics)
         self.assertNotIn("topic", first_metrics)
+
+    def test_metrics_persist_across_request_metrics_instances(self) -> None:
+        database_path = Path(self.observability_dir.name) / "persistent.sqlite3"
+        first_instance = RequestMetrics(database_path)
+        first_instance.observe_request("GET", 200, 0.02)
+        first_instance.observe_request("POST", 503, 0.3)
+
+        restored_instance = RequestMetrics(database_path)
+        output = restored_instance.render_prometheus()
+
+        self.assertIn(
+            'social_media_agent_http_requests_total{method="GET",status_code="200"} 1',
+            output,
+        )
+        self.assertIn(
+            'social_media_agent_http_request_duration_seconds_sum{method="POST",status_code="503"} 0.300000',
+            output,
+        )
+
+    def test_persistent_error_reporting_retains_only_recent_events(self) -> None:
+        database_path = Path(self.observability_dir.name) / "retained-errors.sqlite3"
+        metrics = RequestMetrics(database_path)
+        metrics.ERROR_RETENTION_LIMIT = 2
+        for request_id in ("first", "second", "third"):
+            metrics.report_error(request_id, "GET", "/test", "RuntimeError")
+
+        connection = sqlite3.connect(database_path)
+        try:
+            retained = connection.execute(
+                "SELECT request_id FROM application_errors ORDER BY id"
+            ).fetchall()
+        finally:
+            connection.close()
+
+        self.assertEqual(retained, [("second",), ("third",)])
+
+    def test_unhandled_web_exceptions_are_reported_without_exposing_messages(self) -> None:
+        with patch("social_media_agent.web.SocialMediaPostGenerator", return_value=Mock()):
+            app = create_app()
+
+        @app.get("/test-unhandled-error")
+        def raise_unhandled_error():
+            raise RuntimeError("private exception details")
+
+        with self.assertLogs("social_media_agent.web", level="ERROR") as captured:
+            response = app.test_client().get("/test-unhandled-error")
+        database_path = Path(app.config["OBSERVABILITY_DB_PATH"])
+        connection = sqlite3.connect(database_path)
+        try:
+            error_row = connection.execute(
+                "SELECT request_id, method, path, error_type FROM application_errors"
+            ).fetchone()
+        finally:
+            connection.close()
+
+        self.assertEqual(response.status_code, 500)
+        self.assertNotIn("private exception details", response.get_data(as_text=True))
+        self.assertIn("private exception details", captured.output[0])
+        self.assertEqual(error_row[0], response.headers["X-Request-ID"])
+        self.assertEqual(error_row[1:], ("GET", "/test-unhandled-error", "RuntimeError"))
 
     def test_metrics_normalize_unrecognized_methods_to_bound_label(self) -> None:
         metrics = RequestMetrics()
@@ -198,7 +345,8 @@ class PhaseTwoCoverageTests(unittest.TestCase):
         app = create_app()
         client = app.test_client()
 
-        response = client.post(
+        response = _post_with_csrf(
+            client,
             "/",
             data={
                 "topic": "AI marketing",
@@ -230,7 +378,8 @@ class PhaseTwoCoverageTests(unittest.TestCase):
             app = create_app()
             client = app.test_client()
 
-            response = client.post(
+            response = _post_with_csrf(
+                client,
                 "/",
                 data={
                     "topic": "AI marketing",
@@ -278,7 +427,8 @@ class PhaseTwoCoverageTests(unittest.TestCase):
             app = create_app()
             client = app.test_client()
             responses = [
-                client.post(
+                _post_with_csrf(
+                    client,
                     "/",
                     data={
                         "topic": "AI marketing",
@@ -316,7 +466,7 @@ class PhaseTwoCoverageTests(unittest.TestCase):
             return_value=Mock(),
         ):
             app = create_app()
-            response = app.test_client().post(
+            response = _post_with_csrf(app.test_client(),
                 "/",
                 data={
                     "topic": "AI marketing",
@@ -347,7 +497,7 @@ class PhaseTwoCoverageTests(unittest.TestCase):
             return_value=Mock(),
         ):
             app = create_app()
-            response = app.test_client().post(
+            response = _post_with_csrf(app.test_client(),
                 "/",
                 data={
                     "topic": "AI marketing",
@@ -381,7 +531,7 @@ class PhaseTwoCoverageTests(unittest.TestCase):
             return_value=Mock(),
         ):
             app = create_app()
-            response = app.test_client().post(
+            response = _post_with_csrf(app.test_client(),
                 "/",
                 data={
                     "topic": "",
@@ -415,7 +565,7 @@ class PhaseTwoCoverageTests(unittest.TestCase):
             return_value=Mock(),
         ):
             app = create_app()
-            response = app.test_client().post(
+            response = _post_with_csrf(app.test_client(),
                 "/",
                 data={
                     "topic": "AI marketing",
@@ -449,7 +599,7 @@ class PhaseTwoCoverageTests(unittest.TestCase):
             return_value=Mock(),
         ):
             app = create_app()
-            response = app.test_client().post(
+            response = _post_with_csrf(app.test_client(),
                 "/",
                 data={
                     "topic": "AI marketing",
@@ -503,7 +653,7 @@ class PhaseTwoCoverageTests(unittest.TestCase):
             return_value=generator,
         ):
             app = create_app()
-            response = app.test_client().post(
+            response = _post_with_csrf(app.test_client(),
                 "/",
                 data={
                     "topic": "AI marketing",
@@ -532,12 +682,13 @@ class PhaseTwoCoverageTests(unittest.TestCase):
             "social_media_agent.web.PeriodicPostScheduler",
             return_value=scheduler,
         ) as scheduler_class, patch(
-            "social_media_agent.web.threading.Thread",
+            "social_media_agent.web.Thread",
             return_value=worker_thread,
         ) as thread_class, tempfile.TemporaryDirectory() as output_dir:
             app = create_app()
             client = app.test_client()
-            response = client.post(
+            response = _post_with_csrf(
+                client,
                 "/",
                 data={
                     "topic": "AI marketing",

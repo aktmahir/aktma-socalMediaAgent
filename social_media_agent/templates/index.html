@@ -29,6 +29,7 @@
         <p>Create captions, hashtags, and CTAs instantly with AI or a smart fallback.</p>
 
         <form method="post" enctype="multipart/form-data">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
           <div class="field">
             <label for="topic">Topic or theme</label>
             <input id="topic" name="topic" type="text" required value="{{ values.topic }}" placeholder="e.g. launching a new product">

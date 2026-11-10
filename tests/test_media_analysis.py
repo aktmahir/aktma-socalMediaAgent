@@ -1,4 +1,6 @@
 import json
+import os
+import re
 import subprocess
 import tempfile
 import unittest
@@ -28,7 +30,35 @@ def _write_png(path: Path, size: tuple[int, int] = (16, 8)) -> None:
     Image.new("RGB", size, (230, 80, 35)).save(path, format="PNG")
 
 
+def _post_with_csrf(client, *args, **kwargs):
+    page = client.get("/")
+    match = re.search(
+        r'<input type="hidden" name="csrf_token" value="([^"]+)"',
+        page.get_data(as_text=True),
+    )
+    if match is None:
+        raise AssertionError("The web form did not contain a CSRF token.")
+    data = dict(kwargs.get("data") or {})
+    data["csrf_token"] = match.group(1)
+    kwargs["data"] = data
+    return client.post(*args, **kwargs)
+
+
 class MediaAnalysisTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.observability_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.observability_dir.cleanup)
+        self.observability_env = patch.dict(
+            os.environ,
+            {
+                "OBSERVABILITY_DB_PATH": str(
+                    Path(self.observability_dir.name) / "observability.sqlite3"
+                )
+            },
+        )
+        self.observability_env.start()
+        self.addCleanup(self.observability_env.stop)
+
     def test_image_analysis_reports_basic_visual_measurements(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "image.png"
@@ -474,7 +504,7 @@ class MediaAnalysisTests(unittest.TestCase):
             app = create_app()
             image = BytesIO()
             Image.new("RGB", (4, 4), (255, 0, 0)).save(image, format="PNG")
-            response = app.test_client().post(
+            response = _post_with_csrf(app.test_client(),
                 "/",
                 data={
                     "topic": "product launch",
@@ -506,7 +536,7 @@ class MediaAnalysisTests(unittest.TestCase):
             app = create_app()
             image = BytesIO()
             Image.new("RGB", (4, 4), (255, 0, 0)).save(image, format="PNG")
-            response = app.test_client().post(
+            response = _post_with_csrf(app.test_client(),
                 "/",
                 data={
                     "topic": "product launch",
@@ -565,7 +595,7 @@ class MediaAnalysisTests(unittest.TestCase):
             app = create_app()
             image = BytesIO()
             Image.new("RGB", (4, 4), (255, 0, 0)).save(image, format="PNG")
-            response = app.test_client().post(
+            response = _post_with_csrf(app.test_client(),
                 "/",
                 data={
                     "topic": "product launch",
@@ -631,7 +661,7 @@ class MediaAnalysisTests(unittest.TestCase):
             app = create_app()
             image = BytesIO()
             Image.new("RGB", (4, 4), (255, 0, 0)).save(image, format="PNG")
-            response = app.test_client().post(
+            response = _post_with_csrf(app.test_client(),
                 "/",
                 data={
                     "topic": "product launch",
@@ -659,7 +689,7 @@ class MediaAnalysisTests(unittest.TestCase):
 
     def test_web_rejects_vision_opt_in_without_media(self) -> None:
         with patch("social_media_agent.web.SocialMediaPostGenerator") as generator_factory:
-            response = create_app().test_client().post(
+            response = _post_with_csrf(create_app().test_client(),
                 "/",
                 data={
                     "topic": "product launch",

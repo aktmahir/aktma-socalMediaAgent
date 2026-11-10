@@ -30,7 +30,7 @@
 - **Description:** Expand regression coverage to the scheduler and generator and run it automatically.
 - **Modules:** `tests/`, CI configuration.
 - **Current state:** `unittest` regression tests cover provider mocks and failures, scheduler output/recovery/supervision, and Flask generation and schedule submissions. GitHub Actions runs the suite on pushes and pull requests across Python 3.10–3.12.
-- **Verified:** The 49-test suite passes locally; GitHub Actions passed all Python 3.10, 3.11, and 3.12 matrix jobs for commit `80d1215` (48 tests at that revision).
+- **Verified:** The current suite discovers 81 tests. In the latest Windows run, 80 passed and one scheduler recovery test hit an intermittent SQLite temporary-directory cleanup race; that test passes when run alone. GitHub Actions passed all Python 3.10, 3.11, and 3.12 matrix jobs for commit `80d1215` (48 tests at that revision).
 - **Remaining:** Expand coverage as new features land.
 
 ### ROAD-05 — Persistent scheduling
@@ -62,8 +62,8 @@
 
 ### ROAD-08 — Operational logging and monitoring
 - **Status:** Partially implemented.
-- **Description:** Web requests and scheduler lifecycle events emit JSON log records with request/job IDs, status, duration, and safe error types; CLI/web entry points enable INFO logging. `GET /metrics` exposes dependency-free Prometheus request counters and duration histograms with bounded method/status labels. Prompts, credentials, file names, and output paths are excluded from structured logs and metrics.
-- **Remaining:** Centralized exception reporting, log retention/rotation, persistent metrics, and production log-sink configuration are not implemented. Metrics are in-process and reset when the web app restarts.
+- **Description:** Web requests and scheduler lifecycle events emit JSON log records with request/job IDs, status, duration, and safe error types; CLI/web entry points enable INFO logging. `/metrics` exposes SQLite-persisted Prometheus request counters and duration histograms with bounded method/status labels. Unhandled web exceptions are correlated to request IDs, logged with tracebacks, and stored as bounded, data-minimized SQLite events.
+- **Remaining:** External error reporting, log retention/rotation, alerting, and production log-sink configuration are not implemented. Prompts, credentials, file names, and output paths are excluded from structured records.
 
 ## Phase 4 — UX and Product Completeness
 
@@ -74,8 +74,8 @@
 ## Phase 5 — Production Readiness
 
 ### ROAD-10 — Deployment and security hardening
-- **Status:** Partially implemented for local liveness only.
-- **Description:** `GET /health` reports that the Flask app is serving requests. It does not check provider credentials, database readiness, or scheduler workers. Production server configuration, environment separation, readiness checks, and protections appropriate to the exposure model remain outstanding. Flask debug mode is disabled and the local runner binds to localhost, but this is not a production deployment setup.
+- **Status:** Partially implemented; readiness checks exist, production deployment is not configured.
+- **Description:** `GET /health` reports liveness. `GET /ready` checks writable observability and upload storage, stable secret configuration, secure session cookies, disabled debug mode, and healthy shared rate-limit storage; it returns 503 when any check fails. It does not verify provider credentials or scheduler workers. Production server configuration, environment separation, and protections appropriate to the exposure model remain outstanding. The local runner binds to localhost and is not a production deployment setup.
 
 ## Phase completion criteria
 
