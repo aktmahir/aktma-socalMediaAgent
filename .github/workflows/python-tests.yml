@@ -65,6 +65,9 @@ jobs:
           printf '%s' 'ci-only-session-secret-value-at-least-32-bytes' > secrets/flask_secret_key.txt
           printf '%s' 'ci-only-browser-password-long-enough' > secrets/web_auth_password.txt
           printf '%s' 'ci-only-metrics-password-long-enough' > secrets/prometheus_password.txt
+          : > secrets/openai_api_key.txt
+          : > secrets/huggingface_api_key.txt
+          : > secrets/cohere_api_key.txt
           docker compose config --quiet
           docker compose -f docker-compose.yml -f docker-compose.tls.yml config --quiet
 

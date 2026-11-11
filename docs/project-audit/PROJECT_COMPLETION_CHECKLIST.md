@@ -13,10 +13,10 @@ This checklist reflects the current prototype status. Checked items are implemen
 - [x] Web form validates basic topic, option, extension, count, and interval input.
 - [x] Scheduler rejects non-positive intervals and negative counts on direct calls.
 - [x] Regression tests pass using Python's built-in `unittest` runner.
-- [ ] Python 3.9 runtime, dependency, package-install, and test compatibility passes the expanded CI matrix (locally verified; successful GitHub rerun pending).
+- [x] Python 3.9 runtime, dependency, package-install, and test compatibility passes the expanded CI matrix (GitHub Actions run 16 passed all 126 tests on Ubuntu 22.04).
 - [x] Flask test-client coverage exercises valid generation, invalid scheduling input, and valid scheduled-job creation.
 - [x] GitHub Actions workflow runs the test suite on pushes and pull requests.
-- [ ] Credentialed live smoke tests for each external provider.
+- [ ] Credentialed live smoke tests pass for each external provider (latest one-request attempt per configured provider fell back locally: OpenAI authentication error, Hugging Face connection error, Cohere HTTP error).
 
 ## Core product and reliability
 
@@ -37,7 +37,7 @@ This checklist reflects the current prototype status. Checked items are implemen
 - [x] Optional ClamAV scans reject detections and label uploads unscanned when ClamAV is unavailable or errors.
 - [x] Bounded image EXIF/orientation and video/audio stream metadata parsing with strict decode/container checks.
 - [x] Optional OpenAI semantic image/video-frame descriptions require an explicit per-upload opt-in.
-- [ ] Exhaustive media validation and reliable semantic interpretation across all content.
+- [ ] Exhaustive media validation and reliable semantic interpretation across all content (bounded local checks and sampled vision cannot guarantee this).
 
 ## Security and operations
 
@@ -52,7 +52,9 @@ This checklist reflects the current prototype status. Checked items are implemen
 - [x] Optional TLS proxy suppresses the Nginx version token in response headers.
 - [x] Redis is attached only to an internal rate-limit network shared with the app, not the scheduler or Prometheus.
 - [x] Gunicorn WSGI and loopback-only Docker Compose deployment configuration with optional Nginx TLS.
-- [ ] Public-production deployment pipeline, external secret management/rotation, and certificate lifecycle.
+- [x] Manual GitHub Actions SSH deployment scaffold for a self-hosted VM, with test/Compose preflight and pinned host-key verification.
+- [x] Let's Encrypt HTTP-01 webroot route and TLS-proxy renewal deploy hook.
+- [ ] Provisioned and publicly validated production VM, external secret manager with verified rotation, and automated certificate renewal lifecycle.
 - [x] Local `.env` signing-key generation, storage, and session invalidation on rotation are documented.
 - [ ] Production secret-management and rotation beyond local `.env`.
 - [x] Application liveness endpoint, structured application/scheduler logs, and persistent request metrics.

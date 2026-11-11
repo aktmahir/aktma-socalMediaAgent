@@ -8,7 +8,7 @@ The project is a local-first Python application for generating social media cont
 
 | Roadmap task | Status | Current evidence |
 | --- | --- | --- |
-| ROAD-01: OpenAI SDK compatibility | Implemented; mocked | Uses the current `OpenAI` client and has success/fallback tests. No live credentialed call has been made. |
+| ROAD-01: OpenAI SDK compatibility | Implemented; mocked; live smoke failed | Uses the current `OpenAI` client and has success/fallback tests. The 2026-11-11 credentialed smoke request fell back locally after an authentication error; successful live access remains unverified. |
 | ROAD-02: Hugging Face and Cohere requests | Implemented; mocked | Bearer auth and response parsing are covered with mocks; Cohere uses v2 Chat. Live provider/model access remains unverified. |
 | ROAD-03: Input and scheduler validation | Implemented; locally tested | CLI, web form, shared interval/count parsers, and scheduler enforce basic input constraints. Automated tests cover parser, CLI, scheduler, and Flask routes. |
 
@@ -16,14 +16,14 @@ The project is a local-first Python application for generating social media cont
 
 | Roadmap task | Status | Current evidence |
 | --- | --- | --- |
-| ROAD-04: Automated tests and CI | Implemented; Python 3.9 locally verified; GitHub rerun pending | Current suite discovers 126 tests; all passed on Windows and in a Python 3.9 container after dependency and package installation. GitHub Actions run 15 passed Python 3.10–3.12 and Docker monitoring checks. Its Python 3.9 job failed before setup because Ubuntu 26.04 has no matching 3.9 build; that job now targets Ubuntu 22.04 and still needs a successful rerun. |
+| ROAD-04: Automated tests and CI | Implemented; Python 3.9–3.12 matrix locally and on CI | Current suite discovers 131 tests; all passed locally on Windows. GitHub Actions run 16 passed all 126 tests present at that revision on Python 3.9 (Ubuntu 22.04) and Python 3.10–3.12. The separate Docker monitoring job failed, so that integration check still needs follow-up. |
 | ROAD-05: Persistent scheduling | Implemented for local and Docker use | SQLite persists jobs, retry attempts, and generated payloads; CLI supports lifecycle controls and recovery. Docker Compose runs a separate supervisor sharing the app database and output volume, with leases coordinating active workers. |
 
-The regression suite covers provider success/failure paths, local fallback, schedule parsing, job state persistence/recovery, output files, Flask generation/scheduling/upload validation, request metrics and structured logs, supervisor recovery/concurrency limits, readiness, proxy-header trust, error reporting, health liveness, and CLI errors. Tests do not make live network calls. Python 3.9 dependency, package-install, and test compatibility pass locally; confirmation of the corrected GitHub runner selection remains pending.
+The regression suite covers provider success/failure paths, local fallback, schedule parsing, job state persistence/recovery, output files, Flask generation/scheduling/upload validation, request metrics and structured logs, supervisor recovery/concurrency limits, readiness, proxy-header trust, error reporting, health liveness, and CLI errors. Tests do not make live network calls. Python 3.9 dependency installation, package installation, and the 126-test suite pass locally and in GitHub Actions run 16. The current 131-test suite passes locally; the overall run's separate Docker monitoring job failed and remains to be investigated.
 
 ## Remaining risks and limitations
 
-- Provider behavior has not been validated using real credentials or current provider-side model access.
+- One minimal credentialed smoke request per configured provider was attempted on 2026-11-11. All fell back locally: OpenAI returned an authentication error, Hugging Face a connection error, and Cohere an HTTP error. Successful real-credential behavior and current model access remain unverified.
 - Hugging Face inference availability and model compatibility depend on provider service support.
 - Scheduler job state is persisted, and web workers use daemon threads and stop with the web process. Docker Compose runs a separate supervisor that recovers abandoned running jobs after their 120-second leases expire. Local installs can run the CLI supervisor or opt into Windows Task Scheduler registration.
 - The Windows task is not registered automatically and starts only after the configured user signs in. Leases prevent concurrent workers per job within one SQLite database; they are not distributed coordination.

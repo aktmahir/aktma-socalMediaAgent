@@ -111,6 +111,22 @@ class MediaAnalysisTests(unittest.TestCase):
                 with self.assertRaisesRegex(MediaAnalysisError, "dimensions are too large"):
                     analyze_media(path, "image")
 
+    def test_oversized_image_is_rejected_before_pixel_conversion(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "large.png"
+            _write_png(path, size=(5, 5))
+
+            with patch(
+                "social_media_agent.media_analysis.MAX_IMAGE_PIXELS",
+                20,
+            ), patch(
+                "social_media_agent.media_analysis.ImageOps.exif_transpose"
+            ) as transpose:
+                with self.assertRaisesRegex(MediaAnalysisError, "dimensions are too large"):
+                    analyze_media(path, "image")
+
+        transpose.assert_not_called()
+
     def test_image_parser_rejects_extension_format_mismatch(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "image.png"
@@ -282,6 +298,32 @@ class MediaAnalysisTests(unittest.TestCase):
             with self.assertRaisesRegex(MediaAnalysisError, "metadata could not be parsed"):
                 analyze_media(Path("sample.mp4"), "video")
 
+    def test_video_stream_over_pixel_limit_is_rejected_before_decoding(self) -> None:
+        probe_result = CompletedProcess(
+            args=["ffprobe"],
+            returncode=0,
+            stdout=(
+                '{"format":{"format_name":"mov,mp4,m4a,3gp,3g2,mj2","duration":"1"},'
+                '"streams":[{"codec_type":"video","codec_name":"h264",'
+                '"width":5,"height":5}]}'
+            ),
+            stderr="",
+        )
+        with patch(
+            "social_media_agent.media_analysis.MAX_VIDEO_FRAME_PIXELS",
+            20,
+        ), patch(
+            "social_media_agent.media_analysis.shutil.which",
+            side_effect=lambda name: name,
+        ), patch(
+            "social_media_agent.media_analysis.subprocess.run",
+            return_value=probe_result,
+        ) as run:
+            with self.assertRaisesRegex(MediaAnalysisError, "pixel limits"):
+                analyze_media(Path("sample.mp4"), "video")
+
+        run.assert_called_once()
+
     def test_video_container_validation_covers_all_allowed_extensions(self) -> None:
         for extension, container, brand in (
             (".mp4", "mov,mp4,m4a,3gp,3g2,mj2", "isom"),
@@ -325,6 +367,22 @@ class MediaAnalysisTests(unittest.TestCase):
         self.assertEqual(len(images), 1)
         self.assertTrue(images[0].startswith("data:image/jpeg;base64,"))
         self.assertIn("-frames:v", run.call_args.args[0])
+
+    def test_vision_preparation_rejects_oversized_image_before_conversion(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "large.png"
+            _write_png(path, size=(5, 5))
+
+            with patch(
+                "social_media_agent.media_analysis.MAX_IMAGE_PIXELS",
+                20,
+            ), patch(
+                "social_media_agent.media_analysis.ImageOps.exif_transpose"
+            ) as transpose:
+                with self.assertRaisesRegex(MediaAnalysisError, "dimensions are too large"):
+                    prepare_vision_images(path, "image")
+
+        transpose.assert_not_called()
 
     def test_openai_vision_analysis_sends_images_and_parses_description(self) -> None:
         response = SimpleNamespace(

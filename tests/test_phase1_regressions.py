@@ -177,6 +177,38 @@ class PhaseOneRegressionTests(unittest.TestCase):
 
         self.assertEqual(generator.provider_model, "custom-cohere-model")
 
+    def test_provider_api_key_is_loaded_from_secret_file(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            secret_path = os.path.join(directory, "provider-key")
+            with open(secret_path, "w", encoding="utf-8") as secret_file:
+                secret_file.write("file-backed-token\n")
+
+            with patch.dict(
+                os.environ,
+                {
+                    "OPENAI_API_KEY": "environment-token",
+                    "OPENAI_API_KEY_FILE": secret_path,
+                },
+            ):
+                generator = SocialMediaPostGenerator(provider="openai")
+
+        self.assertEqual(generator.api_key, "file-backed-token")
+
+    def test_missing_provider_secret_file_fails_without_exposing_path(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            missing_path = os.path.join(directory, "missing-provider-secret")
+            with patch.dict(
+                os.environ,
+                {
+                    "OPENAI_API_KEY": "",
+                    "OPENAI_API_KEY_FILE": missing_path,
+                },
+            ), self.assertRaisesRegex(
+                RuntimeError,
+                "Could not read the configured OPENAI_API_KEY",
+            ):
+                SocialMediaPostGenerator(provider="openai")
+
     def test_provider_http_failure_falls_back_to_local_generation(self) -> None:
         for provider, method_name in (
             ("huggingface", "_generate_huggingface"),

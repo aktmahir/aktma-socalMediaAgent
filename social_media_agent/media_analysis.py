@@ -20,6 +20,7 @@ class MediaAnalysisError(ValueError):
 FRAME_SIZE = 64
 MAX_VIDEO_FRAMES = 3
 MAX_IMAGE_PIXELS = 20_000_000
+MAX_VIDEO_FRAME_PIXELS = MAX_IMAGE_PIXELS
 MAX_IMAGE_FRAMES_TO_INSPECT = 100
 MAX_TOTAL_IMAGE_FRAME_PIXELS = 80_000_000
 
@@ -68,6 +69,7 @@ def prepare_vision_images(path: Path, media_type: str) -> List[str]:
             with Image.open(path) as source:
                 _validate_image_format(path, source)
                 source.seek(0)
+                _validate_image_dimensions(*source.size)
                 image = ImageOps.exif_transpose(source).convert("RGB")
                 image.thumbnail((1024, 1024))
                 return [_image_data_url(image)]
@@ -92,13 +94,10 @@ def _analyze_image(path: Path) -> Dict[str, object]:
             exif = source.getexif()
             exif_orientation = exif.get(274)
             exif_metadata, exif_tag_names = _extract_exif_metadata(exif)
+            _validate_image_dimensions(width, height)
             image = ImageOps.exif_transpose(source).convert("RGB")
             width, height = image.size
             image.thumbnail((FRAME_SIZE, FRAME_SIZE))
-            if width <= 0 or height <= 0 or width * height > MAX_IMAGE_PIXELS:
-                raise MediaAnalysisError(
-                    "Image dimensions are too large for local analysis."
-                )
             frame_limit = min(
                 MAX_IMAGE_FRAMES_TO_INSPECT,
                 max(1, MAX_TOTAL_IMAGE_FRAME_PIXELS // (width * height)),
@@ -362,14 +361,20 @@ def _probe_video(path: Path) -> Dict[str, object]:
             }
             for stream in video_source_streams
         ]
-        if any(
-            not isinstance(stream["width"], int)
-            or not isinstance(stream["height"], int)
-            or stream["width"] <= 0
-            or stream["height"] <= 0
-            for stream in video_streams
-        ):
-            raise ValueError("Invalid video stream dimensions.")
+        for stream in video_streams:
+            width = stream["width"]
+            height = stream["height"]
+            if (
+                not isinstance(width, int)
+                or not isinstance(height, int)
+                or width <= 0
+                or height <= 0
+            ):
+                raise ValueError("Invalid video stream dimensions.")
+            if width * height > MAX_VIDEO_FRAME_PIXELS:
+                raise MediaAnalysisError(
+                    "A video stream exceeds local analysis pixel limits."
+                )
         return {
             "container": format_info.get("format_name", "unknown"),
             "duration_seconds": duration_value,
@@ -394,6 +399,8 @@ def _probe_video(path: Path) -> Dict[str, object]:
                 if isinstance(stream, dict) and stream.get("codec_type") == "audio"
             ),
         }
+    except MediaAnalysisError:
+        raise
     except (TypeError, ValueError, json.JSONDecodeError) as exc:
         raise MediaAnalysisError("The uploaded video metadata could not be parsed.") from exc
 
@@ -406,11 +413,10 @@ def _validate_image_frames(image: Image.Image, frame_limit: int) -> int:
             image.seek(frame_index)
         except EOFError:
             break
-        image.load()
         width, height = image.size
+        _validate_image_dimensions(width, height)
+        image.load()
         frame_pixels = width * height
-        if width <= 0 or height <= 0 or frame_pixels > MAX_IMAGE_PIXELS:
-            raise MediaAnalysisError("An image frame exceeds local parsing limits.")
         total_frame_pixels += frame_pixels
         if frame_count >= frame_limit or total_frame_pixels > MAX_TOTAL_IMAGE_FRAME_PIXELS:
             raise MediaAnalysisError(
@@ -419,6 +425,11 @@ def _validate_image_frames(image: Image.Image, frame_limit: int) -> int:
         frame_count += 1
     image.seek(0)
     return frame_count
+
+
+def _validate_image_dimensions(width: int, height: int) -> None:
+    if width <= 0 or height <= 0 or width * height > MAX_IMAGE_PIXELS:
+        raise MediaAnalysisError("Image dimensions are too large for local analysis.")
 
 
 def _parse_frame_rate(value: object) -> Optional[float]:

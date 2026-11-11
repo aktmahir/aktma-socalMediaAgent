@@ -102,13 +102,23 @@ class SocialMediaPostGenerator:
                 self.use_openai = False
 
     def _load_api_key_for_provider(self, provider: str) -> Optional[str]:
-        if provider == "openai":
-            return os.getenv("OPENAI_API_KEY")
-        if provider == "huggingface":
-            return os.getenv("HUGGINGFACE_API_KEY")
-        if provider == "cohere":
-            return os.getenv("COHERE_API_KEY")
-        return None
+        environment_name = {
+            "openai": "OPENAI_API_KEY",
+            "huggingface": "HUGGINGFACE_API_KEY",
+            "cohere": "COHERE_API_KEY",
+        }.get(provider)
+        if environment_name is None:
+            return None
+        secret_path = os.getenv(f"{environment_name}_FILE")
+        if secret_path:
+            try:
+                secret_value = Path(secret_path).read_text(encoding="utf-8").rstrip("\r\n")
+            except OSError as exc:
+                raise RuntimeError(
+                    f"Could not read the configured {environment_name} secret file."
+                ) from exc
+            return secret_value or None
+        return os.getenv(environment_name)
 
     def _load_provider_model(self, provider: str, openai_model: str) -> str:
         if provider == "openai":
@@ -161,7 +171,9 @@ class SocialMediaPostGenerator:
                 "Provider vision requires the OpenAI Python package."
             )
         vision_api_key = (
-            self.api_key if self.provider == "openai" else os.getenv("OPENAI_API_KEY")
+            self.api_key
+            if self.provider == "openai"
+            else self._load_api_key_for_provider("openai")
         )
         if not vision_api_key:
             raise MediaAnalysisError(

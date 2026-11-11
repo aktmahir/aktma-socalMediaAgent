@@ -146,7 +146,7 @@ To enable single-user authentication for local or Docker use, set both `WEB_AUTH
 The Docker Compose setup runs the app behind Gunicorn, a separate scheduled-job recovery supervisor, Redis for shared rate limits, and Prometheus for authenticated app-metric scraping. The app, scheduler, Redis, and Prometheus run non-root with read-only root filesystems, no Linux capabilities, and bounded temporary storage; persistent application data is restricted to named volumes. Redis is accessible only to the app through a dedicated internal network. The optional TLS proxy also uses a read-only root filesystem and retains only the capabilities needed to bind ports 80/443, initialize worker cache directories, and drop worker privileges. The stack publishes the app and Prometheus UI only on loopback (`127.0.0.1:8000` and `127.0.0.1:9090`) and stores scheduler state, scheduled posts, uploads, and Prometheus data in named volumes.
 
 1. Copy `.env.example` to `.env`, then set `WEB_AUTH_USERNAME`.
-2. Create the git-ignored `secrets` directory and put the following values in separate files (one value per file; no extra lines): `flask_secret_key.txt` (generated, at least 32 characters), `web_auth_password.txt` (at least 16 characters), and `prometheus_password.txt` (at least 16 characters). Keep these files private; Compose mounts them as read-only Docker secrets into only the services that need them.
+2. Create the git-ignored `secrets` directory and put the following values in separate files (one value per file): `flask_secret_key.txt` (generated, at least 32 characters), `web_auth_password.txt` and `prometheus_password.txt` (at least 16 characters each), and the provider key files `openai_api_key.txt`, `huggingface_api_key.txt`, and `cohere_api_key.txt` (leave unused provider files empty). Keep these files private; Compose mounts them as read-only Docker secrets only into services that need them.
 3. Start the services with `docker compose up --build`.
 4. Open `http://127.0.0.1:8000`; sign in using the configured credentials.
 5. Inspect Prometheus alerts at `http://127.0.0.1:9090/alerts`.
@@ -164,7 +164,65 @@ openssl req -x509 -nodes -days 365 -newkey rsa:3072 \
 docker compose -f docker-compose.yml -f docker-compose.tls.yml up --build
 ```
 
-Compose v2.24 or newer is required for the TLS overlay. Open `https://localhost:8443` and sign in; a browser warning is expected for a self-signed certificate. HTTP on port 8080 redirects to HTTPS. The overlay removes the app's published HTTP port, enables secure session cookies, and configures one trusted proxy hop from Nginx's fixed private IP. The app drops forwarded headers from any other peer, and Nginx replaces them with values from the actual connection rather than preserving client-supplied forwarding chains. The overlay reserves Docker subnet `172.30.252.0/24`; if it conflicts with another network, change the subnet and matching proxy IP together. The TLS listener binds to loopback by default; use `TLS_BIND_ADDRESS` only when intentionally changing network exposure. For a real domain, provide a certificate and private key with matching subject names, protect the key file, configure the external HTTPS port with `TLS_HTTPS_PORT`, and configure network/firewall access deliberately. This sample is not a complete public-production setup.
+Compose v2.24 or newer is required for the TLS overlay. Open `https://localhost:8443` and sign in; a browser warning is expected for a self-signed certificate. HTTP on port 8080 redirects to HTTPS. The overlay removes the app's published HTTP port, enables secure session cookies, and configures one trusted proxy hop from Nginx's fixed private IP. The app drops forwarded headers from any other peer, and Nginx replaces them with values from the actual connection rather than preserving client-supplied forwarding chains. The overlay reserves Docker subnet `172.30.252.0/24`; if it conflicts with another network, change the subnet and matching proxy IP together. The TLS listener binds to loopback by default; use `TLS_BIND_ADDRESS` only when intentionally changing network exposure. For a real domain, provide a certificate and private key with matching subject names, protect the key file, configure the external HTTPS port with `TLS_HTTPS_PORT`, and configure network/firewall access deliberately. This local sample is not a complete public-production setup.
+
+### Self-hosted production VM
+
+The repository includes a manual GitHub Actions deployment workflow at `.github/workflows/deploy-production.yml`. It only deploys `main` after an explicit confirmation, runs the test suite and Compose configuration checks first, transfers an immutable release over SSH using a pinned `DEPLOY_KNOWN_HOSTS` value, starts the TLS Compose stack, and checks the public `/ready` endpoint. Configure a protected GitHub Environment named `production`, require reviewers there, and add:
+
+- Environment secrets: `DEPLOY_HOST`, `DEPLOY_USER`, `DEPLOY_SSH_PRIVATE_KEY`, and `DEPLOY_KNOWN_HOSTS` (verified host-key line from an independent trusted source; do not generate trust by running `ssh-keyscan` in the workflow).
+- Environment variables: `DEPLOY_PATH` (absolute path without spaces, such as `/opt/social-media-agent`), `DEPLOY_PORT` (optional; defaults to `22`), and `APP_DOMAIN` (the public DNS name).
+
+Before dispatching the workflow, prepare a Linux VM with Docker Engine and the Compose plugin, `rsync`, `curl`, `certbot`, and OpenSSL. Configure the deployment user for Docker access, DNS A/AAAA records, and a firewall that allows inbound TCP 80/443 only as intended. The deployment user must be able to create releases under `DEPLOY_PATH`; membership in the Docker group grants root-equivalent control of the host.
+
+Create `/etc/social-media-agent/.env` and `/etc/social-media-agent/secrets/` on the VM. Set `WEB_AUTH_USERNAME`, `TLS_BIND_ADDRESS=0.0.0.0`, `TLS_HTTPS_PORT=443`, `TLS_HTTP_PORT=80`, and `CERTBOT_WEBROOT=/var/lib/letsencrypt/www` in the environment file; configure `AI_PROVIDER` and model settings as needed. Place `flask_secret_key.txt`, `web_auth_password.txt`, `prometheus_password.txt`, `openai_api_key.txt`, `huggingface_api_key.txt`, and `cohere_api_key.txt` in the secrets directory. Generate a unique session key and strong passwords; unused provider key files may be empty. Restrict the config directory to root and the deployment account (for example, mode `0750` on directories and `0640` on files). Do not put secret contents in GitHub variables, workflow logs, or the repository.
+
+These are Docker Compose file-backed secrets, not an external vault: they are protected by VM filesystem permissions but are not encrypted at rest by Compose. Rotate a secret by atomically replacing its file with restricted permissions, then recreate the consuming services; for provider keys use `docker compose ... up -d --force-recreate app scheduler`. Rotate `flask_secret_key.txt` to invalidate browser sessions. For managed, audited, or centrally rotated secrets, integrate a host-side secret manager before treating the service as production-ready.
+
+For initial TLS, create the webroot and secret directories. Use a temporary self-signed certificate only to start the first proxy; replace it with a publicly trusted certificate before using the service:
+
+```sh
+sudo install -d -m 0755 /var/lib/letsencrypt/www
+sudo install -d -m 0750 /etc/social-media-agent/secrets
+sudo openssl req -x509 -nodes -days 1 -newkey rsa:2048 \
+  -keyout /etc/social-media-agent/secrets/tls.key \
+  -out /etc/social-media-agent/secrets/tls.crt \
+  -subj "/CN=YOUR_PUBLIC_DOMAIN"
+sudo chmod 0640 /etc/social-media-agent/secrets/tls.key \
+  /etc/social-media-agent/secrets/tls.crt
+```
+
+Dispatch the deployment workflow after DNS and firewall setup, then issue the real certificate with Certbot HTTP-01 webroot validation (replace the domain and email placeholders):
+
+```sh
+APP_DOMAIN=YOUR_PUBLIC_DOMAIN
+CERTBOT_EMAIL=YOUR_EMAIL_ADDRESS
+sudo install -d -m 0755 /var/lib/letsencrypt/www
+sudo certbot certonly --webroot -w /var/lib/letsencrypt/www \
+  -d "$APP_DOMAIN" -m "$CERTBOT_EMAIL" --agree-tos --no-eff-email
+sudo ln -sfn "/etc/letsencrypt/live/$APP_DOMAIN/fullchain.pem" \
+  /etc/social-media-agent/secrets/tls.crt
+sudo ln -sfn "/etc/letsencrypt/live/$APP_DOMAIN/privkey.pem" \
+  /etc/social-media-agent/secrets/tls.key
+```
+
+Install a deploy hook that calls the included `scripts/renew-production-tls.sh`:
+
+```sh
+sudo tee /etc/letsencrypt/renewal-hooks/deploy/20-social-media-agent.sh >/dev/null <<'EOF'
+#!/bin/sh
+DEPLOY_PATH=/opt/social-media-agent
+export DEPLOY_PATH
+exec sh /opt/social-media-agent/current/scripts/renew-production-tls.sh
+EOF
+sudo chmod 0755 /etc/letsencrypt/renewal-hooks/deploy/20-social-media-agent.sh
+sudo DEPLOY_PATH=/opt/social-media-agent sh \
+  /opt/social-media-agent/current/scripts/renew-production-tls.sh
+sudo systemctl enable --now certbot.timer
+sudo certbot renew --dry-run
+```
+
+The hook recreates only the TLS proxy so Docker re-resolves the renewed certificate symlinks. Confirm the renewed certificate is served after a real renewal. Keep the workflow manual until the VM, credentials, DNS, access controls, secret permissions, and certificate renewal have been verified. This is a deployment scaffold, not a claim that a public production deployment has been completed.
 
 Prometheus alert rules flag an unavailable metrics target, a sustained 5xx response rate above 5%, p95 request latency above 2 seconds, an unavailable scheduler database, failed scheduled jobs, or newly recorded unhandled application errors. The unhandled-error counter persists across app restarts while the detailed event table retains only its most recent 1,000 records. Scheduler job counts are read from the configured SQLite scheduler database (`SCHEDULER_DB_PATH`, defaulting to `SCHEDULED_OUTPUT_ROOT/scheduler.sqlite3`). Alerts are visible in the local Prometheus UI; notification delivery (email, PagerDuty, or webhook) is not configured by default.
 
@@ -182,7 +240,7 @@ aktma-socalmediaagent-web
 
 ## Upload support
 
-The Web UI accepts allowlisted image and video uploads up to 5 MB each. It checks that the file's initial signature matches the extension and selected media type, then stores it under a random server-generated name to prevent path control and accidental overwrites. Images and videos are parsed locally for bounded format, metadata, and visual observations; ClamAV scanning is optional and may report files as unscanned. By default, file bytes are not sent to providers. The explicit OpenAI vision opt-in described above sends an image or sampled video frames externally. These checks are not exhaustive validation or a safety guarantee; the upload workflow is intended for local use, not public exposure.
+The Web UI accepts allowlisted image and video uploads up to 5 MB each. It checks that the file's initial signature matches the extension and selected media type, then stores it under a random server-generated name to prevent path control and accidental overwrites. Images and video streams above 20 million pixels are rejected before pixel conversion or frame decoding. Media is otherwise parsed locally for bounded format, metadata, and visual observations; ClamAV scanning is optional and may report files as unscanned. By default, file bytes are not sent to providers. The explicit OpenAI vision opt-in described above sends an image or sampled video frames externally. These checks are not exhaustive validation or a safety guarantee, and sampled or model-generated descriptions may be incomplete or incorrect; the upload workflow is intended for local use, not public exposure.
 
 Supported media types:
 - `text`
@@ -214,7 +272,7 @@ Run the regression tests from the repository root:
 python -m unittest discover -s tests -v
 ```
 
-Provider behavior is covered by mocked tests. Live API calls require valid provider credentials and have not been verified as part of the local test suite.
+Provider behavior is covered by mocked tests. A credentialed smoke request was attempted for each configured provider on 2026-11-11; all three fell back locally (OpenAI authentication error, Hugging Face connection error, Cohere HTTP error). Successful live access therefore remains unverified; credential values and provider response bodies were not recorded.
 
 ## Continuous integration
 

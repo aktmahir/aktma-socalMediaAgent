@@ -1,0 +1,145 @@
+name: Deploy self-hosted production
+
+permissions:
+  contents: read
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_production:
+        description: Confirm deployment of main to the production VM
+        required: true
+        type: boolean
+        default: false
+
+concurrency:
+  group: self-hosted-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: github.ref == 'refs/heads/main' && inputs.confirm_production
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.12"
+
+      - name: Test release and validate Compose
+        env:
+          WEB_AUTH_USERNAME: ci-user
+          TLS_BIND_ADDRESS: 0.0.0.0
+          TLS_HTTPS_PORT: "443"
+          TLS_HTTP_PORT: "80"
+          CERTBOT_WEBROOT: /tmp/certbot/www
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          python -m pip install .
+          python -m unittest discover -s tests -v
+          mkdir -p secrets
+          printf '%s' 'ci-only-session-secret-value-at-least-32-bytes' > secrets/flask_secret_key.txt
+          printf '%s' 'ci-only-browser-password-long-enough' > secrets/web_auth_password.txt
+          printf '%s' 'ci-only-metrics-password-long-enough' > secrets/prometheus_password.txt
+          : > secrets/openai_api_key.txt
+          : > secrets/huggingface_api_key.txt
+          : > secrets/cohere_api_key.txt
+          printf '%s' 'ci-only-certificate' > secrets/tls.crt
+          printf '%s' 'ci-only-private-key' > secrets/tls.key
+          docker compose config --quiet
+          docker compose -f docker-compose.yml -f docker-compose.tls.yml config --quiet
+
+      - name: Deploy immutable release over SSH
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_PORT: ${{ vars.DEPLOY_PORT }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_SSH_PRIVATE_KEY: ${{ secrets.DEPLOY_SSH_PRIVATE_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+          DEPLOY_PATH: ${{ vars.DEPLOY_PATH }}
+          APP_DOMAIN: ${{ vars.APP_DOMAIN }}
+        run: |
+          set -euo pipefail
+          : "${DEPLOY_HOST:?Configure production secret DEPLOY_HOST}"
+          : "${DEPLOY_USER:?Configure production secret DEPLOY_USER}"
+          : "${DEPLOY_SSH_PRIVATE_KEY:?Configure production secret DEPLOY_SSH_PRIVATE_KEY}"
+          : "${DEPLOY_KNOWN_HOSTS:?Configure production secret DEPLOY_KNOWN_HOSTS with a verified host key}"
+          : "${DEPLOY_PATH:?Configure production variable DEPLOY_PATH}"
+          : "${APP_DOMAIN:?Configure production variable APP_DOMAIN}"
+          DEPLOY_PORT="${DEPLOY_PORT:-22}"
+          [[ "$DEPLOY_HOST" =~ ^[A-Za-z0-9][A-Za-z0-9.-]*$ ]]
+          [[ "$DEPLOY_USER" =~ ^[A-Za-z0-9._-]+$ ]]
+          [[ "$DEPLOY_PATH" =~ ^/[A-Za-z0-9._/-]+$ ]]
+          [[ "$DEPLOY_PATH" != *"/../"* && "$DEPLOY_PATH" != */.. ]]
+          [[ "$DEPLOY_PORT" =~ ^[0-9]+$ ]]
+          (( DEPLOY_PORT >= 1 && DEPLOY_PORT <= 65535 ))
+          [[ "$APP_DOMAIN" =~ ^[A-Za-z0-9.-]+$ ]]
+
+          key_file="$RUNNER_TEMP/deploy_key"
+          known_hosts_file="$RUNNER_TEMP/known_hosts"
+          printf '%s\n' "$DEPLOY_SSH_PRIVATE_KEY" > "$key_file"
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > "$known_hosts_file"
+          chmod 600 "$key_file" "$known_hosts_file"
+          ssh_options=(-i "$key_file" -p "$DEPLOY_PORT" -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$known_hosts_file")
+          remote="${DEPLOY_USER}@${DEPLOY_HOST}"
+          release_path="${DEPLOY_PATH}/releases/${GITHUB_SHA}"
+
+          ssh "${ssh_options[@]}" "$remote" mkdir -p "$release_path"
+          rsync -az -e "ssh -i $key_file -p $DEPLOY_PORT -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$known_hosts_file" \
+            --exclude='/.git/' \
+            --exclude='/.venv/' \
+            --exclude='/.env' \
+            --exclude='/secrets/' \
+            --exclude='/uploads/' \
+            --exclude='/scheduled_posts/' \
+            --exclude='/__pycache__/' \
+            --exclude='/certbot/' \
+            ./ "${remote}:${release_path}/"
+
+          ssh "${ssh_options[@]}" "$remote" bash -s -- "$DEPLOY_PATH" "$GITHUB_SHA" <<'REMOTE'
+          set -euo pipefail
+          deploy_path="$1"
+          release_sha="$2"
+          release_path="${deploy_path}/releases/${release_sha}"
+          config_dir=/etc/social-media-agent
+
+          test -f "${config_dir}/.env"
+          for name in flask_secret_key web_auth_password prometheus_password openai_api_key huggingface_api_key cohere_api_key; do
+            test -f "${config_dir}/secrets/${name}.txt" || {
+              echo "Missing required production secret file: ${config_dir}/secrets/${name}.txt" >&2
+              exit 1
+            }
+          done
+          test -f "${config_dir}/secrets/tls.crt"
+          test -f "${config_dir}/secrets/tls.key"
+          test -d /var/lib/letsencrypt/www
+
+          ln -sfn "${config_dir}/.env" "${release_path}/.env"
+          ln -sfn "${config_dir}/secrets" "${release_path}/secrets"
+          compose=(docker compose --project-name social-media-agent --project-directory "$release_path" --env-file "${release_path}/.env" -f "${release_path}/docker-compose.yml" -f "${release_path}/docker-compose.tls.yml")
+          "${compose[@]}" config --quiet
+          "${compose[@]}" up -d --build --remove-orphans
+          ready=0
+          for attempt in $(seq 1 30); do
+            if "${compose[@]}" exec -T app python -c "from urllib.request import urlopen; urlopen('http://127.0.0.1:8000/ready', timeout=5)"; then
+              ready=1
+              break
+            fi
+            sleep 2
+          done
+          if [ "$ready" -ne 1 ]; then
+            echo "The application did not become ready after deployment." >&2
+            exit 1
+          fi
+          ln -sfnT "$release_path" "${deploy_path}/current.next"
+          mv -Tf "${deploy_path}/current.next" "${deploy_path}/current"
+          REMOTE
+
+          curl --fail --silent --show-error --retry 12 --retry-connrefused --retry-delay 5 "https://${APP_DOMAIN}/ready"

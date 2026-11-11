@@ -16,11 +16,11 @@ services:
       - "127.0.0.1:8000:8000"
     environment:
       AI_PROVIDER: ${AI_PROVIDER:-openai}
-      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_API_KEY_FILE: /run/secrets/openai_api_key
       OPENAI_VISION_MODEL: ${OPENAI_VISION_MODEL:-}
-      HUGGINGFACE_API_KEY: ${HUGGINGFACE_API_KEY:-}
+      HUGGINGFACE_API_KEY_FILE: /run/secrets/huggingface_api_key
       HUGGINGFACE_MODEL: ${HUGGINGFACE_MODEL:-gpt2}
-      COHERE_API_KEY: ${COHERE_API_KEY:-}
+      COHERE_API_KEY_FILE: /run/secrets/cohere_api_key
       COHERE_MODEL: ${COHERE_MODEL:-command-a-03-2025}
       FLASK_SECRET_KEY_FILE: /run/secrets/flask_secret_key
       WEB_AUTH_USERNAME: ${WEB_AUTH_USERNAME:?Set WEB_AUTH_USERNAME in .env}
@@ -41,6 +41,9 @@ services:
       - flask_secret_key
       - web_auth_password
       - prometheus_password
+      - openai_api_key
+      - huggingface_api_key
+      - cohere_api_key
     depends_on:
       redis:
         condition: service_healthy
@@ -87,15 +90,19 @@ services:
       - /app/scheduled_posts/scheduler.sqlite3
     environment:
       AI_PROVIDER: ${AI_PROVIDER:-openai}
-      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_API_KEY_FILE: /run/secrets/openai_api_key
       OPENAI_VISION_MODEL: ${OPENAI_VISION_MODEL:-}
-      HUGGINGFACE_API_KEY: ${HUGGINGFACE_API_KEY:-}
+      HUGGINGFACE_API_KEY_FILE: /run/secrets/huggingface_api_key
       HUGGINGFACE_MODEL: ${HUGGINGFACE_MODEL:-gpt2}
-      COHERE_API_KEY: ${COHERE_API_KEY:-}
+      COHERE_API_KEY_FILE: /run/secrets/cohere_api_key
       COHERE_MODEL: ${COHERE_MODEL:-command-a-03-2025}
       SCHEDULED_OUTPUT_ROOT: /app/scheduled_posts
     volumes:
       - scheduled_posts:/app/scheduled_posts
+    secrets:
+      - openai_api_key
+      - huggingface_api_key
+      - cohere_api_key
     depends_on:
       app:
         condition: service_healthy
@@ -180,6 +187,12 @@ networks:
     internal: true
 
 secrets:
+  openai_api_key:
+    file: ./secrets/openai_api_key.txt
+  huggingface_api_key:
+    file: ./secrets/huggingface_api_key.txt
+  cohere_api_key:
+    file: ./secrets/cohere_api_key.txt
   flask_secret_key:
     file: ./secrets/flask_secret_key.txt
   web_auth_password:

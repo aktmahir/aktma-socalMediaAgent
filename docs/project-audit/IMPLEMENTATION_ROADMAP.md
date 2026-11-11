@@ -30,7 +30,7 @@
 - **Description:** Expand regression coverage to the scheduler and generator and run it automatically.
 - **Modules:** `tests/`, CI configuration.
 - **Current state:** `unittest` regression tests cover provider mocks and failures, scheduler output/recovery/supervision, and Flask generation and schedule submissions. GitHub Actions is configured to run the suite on pushes and pull requests across Python 3.9–3.12.
-- **Verified:** The current suite discovers 126 tests; the latest full Windows run and a Python 3.9 container run both passed all 126. On Python 3.9, dependency installation and `pip install .` also passed. GitHub Actions run 15 passed Python 3.10–3.12 and Docker monitoring checks, but its Python 3.9 job could not start because `ubuntu-latest` resolved to Ubuntu 26.04, which has no matching 3.9 build. The 3.9 job now targets Ubuntu 22.04; a successful GitHub rerun is pending.
+- **Verified:** The current suite discovers 131 tests and the full Windows run passed all 131. The 126-test suite at GitHub Actions run 16 passed locally in a Python 3.9 container and on CI across Python 3.9 (Ubuntu 22.04) and Python 3.10–3.12; Python 3.9 dependency installation and `pip install .` also passed. The separate Docker monitoring job failed in run 16 and requires follow-up.
 - **Remaining:** Expand coverage as new features land.
 
 ### ROAD-05 — Persistent scheduling
@@ -77,12 +77,12 @@
 ## Phase 5 — Production Readiness
 
 ### ROAD-10 — Deployment and security hardening
-- **Status:** Partially implemented; a local-only Docker/Gunicorn stack and readiness checks are available, but public production deployment is not configured.
-- **Description:** `GET /health` reports liveness. `GET /ready` checks writable observability, upload storage, and scheduled-output storage, browser and Prometheus scrape authentication, stable secret configuration, secure session cookies, disabled debug mode, and healthy shared rate-limit storage; it returns 503 when any check fails and creates the configured scheduled-output root if needed. The app can read its Flask key and auth passwords from mounted `*_FILE` paths; Compose mounts local secret files read-only, which are not encrypted at rest. The optional TLS Compose overlay runs Nginx, removes the app's published HTTP port, and configures one trusted forwarded-header hop from the proxy's exact IP; forwarded headers from other peers are discarded and headers are ignored by default. It does not verify provider credentials or scheduler workers. Web-supplied schedule paths are confined to configurable `SCHEDULED_OUTPUT_ROOT`. External certificate issuance/renewal, an external secret manager/rotation, and deployment configuration for public exposure remain outstanding.
+- **Status:** Partially implemented; a manual SSH production deployment scaffold and Certbot renewal hook are available for a self-hosted VM, but host provisioning and live deployment remain unverified.
+- **Description:** `GET /health` reports liveness. `GET /ready` checks writable observability, upload storage, and scheduled-output storage, browser and Prometheus scrape authentication, stable secret configuration, secure session cookies, disabled debug mode, and healthy shared rate-limit storage; it returns 503 when any check fails and creates the configured scheduled-output root if needed. The app can read Flask, auth, and provider API keys from mounted `*_FILE` paths; Compose mounts host-managed secret files read-only, which are not encrypted at rest. The optional TLS Compose overlay supports a Certbot HTTP-01 webroot challenge, removes the app's published HTTP port, and configures one trusted forwarded-header hop from the proxy's exact IP. A manual GitHub Actions workflow preflights tests/Compose and deploys a release over SSH to a self-hosted VM using verified known-host data; a Certbot deploy hook recreates the TLS proxy after renewal. These are unverified deployment scaffolds: host provisioning, public deployment, external secret manager/rotation, and live certificate renewal remain outstanding.
 
 ## Phase completion criteria
 
-- **Phase 1:** Provider adapters and basic input/schedule checks are implemented and mock-tested; live provider smoke tests remain.
+- **Phase 1:** Provider adapters and basic input/schedule checks are implemented and mock-tested. Credentialed provider smoke requests were attempted on 2026-11-11, but OpenAI returned an authentication error, Hugging Face a connection error, and Cohere an HTTP error; successful live checks remain.
 - **Phase 2:** Core behavior has broad test coverage and scheduled jobs have durable state.
 - **Phase 3:** Upload/data handling and operational controls are reliable.
 - **Phase 4:** The UI presents clear, tested workflows.
