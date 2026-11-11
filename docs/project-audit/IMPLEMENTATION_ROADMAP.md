@@ -30,7 +30,7 @@
 - **Description:** Expand regression coverage to the scheduler and generator and run it automatically.
 - **Modules:** `tests/`, CI configuration.
 - **Current state:** `unittest` regression tests cover provider mocks and failures, scheduler output/recovery/supervision, and Flask generation and schedule submissions. GitHub Actions is configured to run the suite on pushes and pull requests across Python 3.9–3.12.
-- **Verified:** The current suite discovers 117 tests; the latest full Windows run passed all 117. GitHub Actions passed Python 3.10, 3.11, and 3.12 for baseline `9f06fdd` (89 tests at that revision); the updated Python 3.9–3.12 matrix, package-install step, and Docker monitoring/scheduler/TLS smoke tests await workflow validation.
+- **Verified:** The current suite discovers 126 tests; the latest full Windows run and a Python 3.9 container run both passed all 126. On Python 3.9, dependency installation and `pip install .` also passed. GitHub Actions run 15 passed Python 3.10–3.12 and Docker monitoring checks, but its Python 3.9 job could not start because `ubuntu-latest` resolved to Ubuntu 26.04, which has no matching 3.9 build. The 3.9 job now targets Ubuntu 22.04; a successful GitHub rerun is pending.
 - **Remaining:** Expand coverage as new features land.
 
 ### ROAD-05 — Persistent scheduling
@@ -65,7 +65,7 @@
 - **Status:** Partially implemented.
 - **Description:** Web requests and scheduler lifecycle events emit JSON log records with request/job IDs, status, duration, and safe error types; CLI/web entry points enable INFO logging. `/metrics` exposes SQLite-persisted Prometheus request counters and duration histograms with bounded method/status labels. Unhandled web exceptions are correlated to request IDs, logged with tracebacks, and stored as bounded, data-minimized SQLite events. Optional Sentry reporting is disabled unless `SENTRY_DSN` is configured; events are scrubbed before transmission.
 - **Added:** Optional `APP_LOG_FILE` logging rotates at `APP_LOG_MAX_BYTES` and keeps `APP_LOG_BACKUP_COUNT` archives. Docker Compose bounds stdout/stderr retention to three 10 MB files.
-- **Added:** Docker Compose scrapes the app with Prometheus using separate HTTP Basic credentials for `/metrics`, with the password mounted as a Docker secret; alert rules cover target availability, sustained 5xx rate, and p95 latency. The Prometheus UI is bound to loopback. GitHub Actions builds this stack, verifies the authenticated scrape and loaded rules, and confirms the scheduler supervisor starts.
+- **Added:** Docker Compose scrapes the app with Prometheus using separate HTTP Basic credentials for `/metrics`, with the password mounted as a Docker secret; alert rules cover target availability, sustained 5xx rate, p95 latency, scheduler database availability, failed scheduled jobs, and unhandled application errors. The Prometheus UI is bound to loopback. GitHub Actions builds this stack, verifies the authenticated scrape, scheduler metrics availability, and loaded rules, and confirms the scheduler supervisor starts.
 - **Remaining:** Alert notification routing and production log-sink configuration are not implemented. Sentry requires an approved project and explicit opt-in configuration; event scrubbing removes full filesystem paths and arbitrary payloads, but retains source basenames, function names, and line numbers. HTTP logs and persisted error records use matched route templates or an `<unmatched>` marker rather than raw URL path values.
 
 ## Phase 4 — UX and Product Completeness

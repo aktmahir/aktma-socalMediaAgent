@@ -47,4 +47,4 @@ where = ["."]
 include = ["social_media_agent*"]
 
 [tool.setuptools.package-data]
-"social_media_agent" = ["templates/*.html"]
+"social_media_agent" = ["templates/*.html", "static/*.css"]

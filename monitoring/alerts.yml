@@ -40,3 +40,30 @@ groups:
         annotations:
           summary: Social Media Agent p95 request latency is above 2 seconds
           description: The p95 HTTP request latency has exceeded 2 seconds for at least 10 minutes.
+
+      - alert: SocialMediaAgentSchedulerMetricsUnavailable
+        expr: social_media_agent_scheduler_metrics_available{job="social-media-agent"} == 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Scheduler job metrics are unavailable
+          description: The scheduler database is missing or has not initialized for at least 5 minutes.
+
+      - alert: SocialMediaAgentScheduledJobsFailed
+        expr: social_media_agent_scheduled_jobs{job="social-media-agent",status="failed"} > 0
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: One or more scheduled jobs have failed
+          description: At least one scheduled job is in a failed state and may require operator review.
+
+      - alert: SocialMediaAgentUnhandledErrors
+        expr: rate(social_media_agent_application_errors_total{job="social-media-agent"}[5m]) > 0
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: The application is reporting unhandled errors
+          description: One or more unhandled application errors occurred during the last 5 minutes.

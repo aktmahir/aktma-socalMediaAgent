@@ -6,6 +6,7 @@ import sqlite3
 import tempfile
 import time
 import uuid
+from datetime import timedelta
 from pathlib import Path
 from threading import Thread
 from typing import Callable, Union
@@ -23,16 +24,19 @@ from .generator import SocialMediaPostGenerator
 from .media_analysis import MediaAnalysisError, analyze_media, scan_for_malware
 from .observability import (
     RequestMetrics,
+    SchedulerMetrics,
     capture_sentry_exception,
     configure_logging,
     configure_sentry,
     log_event,
     log_exception_event,
+    log_warning_event,
 )
 from .scheduler import PeriodicPostScheduler, parse_count, parse_interval
 
 logger = logging.getLogger(__name__)
 
+WEB_SESSION_MAX_AGE_SECONDS = 12 * 60 * 60
 PLATFORMS = ["instagram", "linkedin", "twitter", "facebook", "youtube", "youtube_shorts"]
 MEDIA_TYPES = ["text", "image", "video"]
 TONES = ["friendly", "professional", "motivational", "funny", "educational"]
@@ -229,6 +233,11 @@ def create_app() -> Flask:
     except ValueError as error:
         raise RuntimeError("TRUSTED_PROXY_IP must be a valid IP address.") from error
     limiter_storage_uri = os.environ.get("RATELIMIT_STORAGE_URI", "memory://")
+    secure_session_cookie = os.environ.get("SESSION_COOKIE_SECURE", "").lower() in {
+        "1",
+        "true",
+        "yes",
+    }
     app.config.update(
         SECRET_KEY=configured_secret or secrets.token_hex(32),
         PRODUCTION_SECRET_CONFIGURED=len(configured_secret.encode("utf-8")) >= 32,
@@ -242,8 +251,10 @@ def create_app() -> Flask:
         TRUSTED_PROXY_IP=str(trusted_proxy_ip) if trusted_proxy_ip else "",
         RATELIMIT_STORAGE_URI=limiter_storage_uri,
         RATELIMIT_SHARED_STORAGE=not limiter_storage_uri.startswith("memory://"),
-        SESSION_COOKIE_SECURE=os.environ.get("SESSION_COOKIE_SECURE", "").lower()
-        in {"1", "true", "yes"},
+        SESSION_COOKIE_NAME="__Host-session" if secure_session_cookie else "session",
+        SESSION_COOKIE_SECURE=secure_session_cookie,
+        SESSION_COOKIE_PATH="/",
+        SESSION_COOKIE_DOMAIN=None,
         OBSERVABILITY_DB_PATH=os.environ.get(
             "OBSERVABILITY_DB_PATH",
             str(Path.cwd() / "scheduled_posts" / "observability.sqlite3"),
@@ -260,6 +271,8 @@ def create_app() -> Flask:
         SENTRY_DSN=os.environ.get("SENTRY_DSN", ""),
         SENTRY_ENVIRONMENT=os.environ.get("SENTRY_ENVIRONMENT", "development"),
         RATELIMIT_HEADERS_ENABLED=True,
+        PERMANENT_SESSION_LIFETIME=timedelta(seconds=WEB_SESSION_MAX_AGE_SECONDS),
+        SESSION_REFRESH_EACH_REQUEST=False,
         SESSION_COOKIE_HTTPONLY=True,
         SESSION_COOKIE_SAMESITE="Lax",
     )
@@ -290,6 +303,10 @@ def create_app() -> Flask:
     UPLOAD_FOLDER.mkdir(parents=True, exist_ok=True)
     generator = SocialMediaPostGenerator()
     request_metrics = RequestMetrics(Path(app.config["OBSERVABILITY_DB_PATH"]))
+    scheduler_database_path = app.config["SCHEDULER_DB_PATH"] or str(
+        Path(app.config["SCHEDULED_OUTPUT_ROOT"]) / "scheduler.sqlite3"
+    )
+    scheduler_metrics = SchedulerMetrics(Path(scheduler_database_path))
 
     def default_form_values():
         return {
@@ -311,6 +328,19 @@ def create_app() -> Flask:
         g.request_id = uuid.uuid4().hex
         g.request_started_at = time.perf_counter()
 
+    def authenticated_session_is_valid() -> bool:
+        if session.get("authenticated") is not True:
+            return False
+        authenticated_at = session.get("authenticated_at")
+        if not isinstance(authenticated_at, (int, float)):
+            session.clear()
+            return False
+        session_age = time.time() - authenticated_at
+        if session_age < 0 or session_age >= WEB_SESSION_MAX_AGE_SECONDS:
+            session.clear()
+            return False
+        return True
+
     @app.before_request
     def require_authentication():
         if request.endpoint == "metrics" and app.config["PROMETHEUS_AUTH_CONFIGURED"]:
@@ -328,7 +358,7 @@ def create_app() -> Flask:
                     return None
             if (
                 not app.config["AUTHENTICATION_CONFIGURED"]
-                or session.get("authenticated") is not True
+                or not authenticated_session_is_valid()
             ):
                 response = Response(status=401)
                 response.headers["WWW-Authenticate"] = 'Basic realm="metrics"'
@@ -337,9 +367,36 @@ def create_app() -> Flask:
             return None
         if request.endpoint in {"login", "health", "readiness", "static"}:
             return None
-        if session.get("authenticated") is True:
+        if authenticated_session_is_valid():
             return None
         return redirect(url_for("login"))
+
+    @app.after_request
+    def add_security_headers(response: Response) -> Response:
+        if response.mimetype == "text/html":
+            response.headers["Cache-Control"] = "no-store"
+        response.headers.setdefault(
+            "Content-Security-Policy",
+            "default-src 'self'; base-uri 'self'; object-src 'none'; "
+            "frame-ancestors 'none'; form-action 'self'; img-src 'self' data:; "
+            "style-src 'self'; script-src 'self'",
+        )
+        response.headers.setdefault("X-Content-Type-Options", "nosniff")
+        response.headers.setdefault("X-Frame-Options", "DENY")
+        response.headers.setdefault(
+            "Referrer-Policy",
+            "strict-origin-when-cross-origin",
+        )
+        response.headers.setdefault(
+            "Permissions-Policy",
+            "camera=(), microphone=(), geolocation=()",
+        )
+        if request.is_secure:
+            response.headers.setdefault(
+                "Strict-Transport-Security",
+                "max-age=31536000",
+            )
+        return response
 
     @app.after_request
     def log_request(response):
@@ -376,7 +433,7 @@ def create_app() -> Flask:
     @limiter.exempt
     def metrics() -> Response:
         return Response(
-            request_metrics.render_prometheus(),
+            request_metrics.render_prometheus() + scheduler_metrics.render_prometheus(),
             content_type="text/plain; version=0.0.4; charset=utf-8",
         )
 
@@ -430,9 +487,15 @@ def create_app() -> Flask:
             ),
         }
         ready = all(checks.values())
-        return jsonify(status="ready" if ready else "not_ready", checks=checks), (
-            200 if ready else 503
-        )
+        response_data: dict[str, object] = {
+            "status": "ready" if ready else "not_ready"
+        }
+        if (
+            not app.config["AUTHENTICATION_CONFIGURED"]
+            or authenticated_session_is_valid()
+        ):
+            response_data["checks"] = checks
+        return jsonify(response_data), 200 if ready else 503
 
     @app.errorhandler(RequestEntityTooLarge)
     def handle_request_too_large(_error: RequestEntityTooLarge):
@@ -496,7 +559,7 @@ def create_app() -> Flask:
     def login():
         if not app.config["AUTHENTICATION_CONFIGURED"]:
             return redirect(url_for("index"))
-        if session.get("authenticated") is True:
+        if authenticated_session_is_valid():
             return redirect(url_for("index"))
 
         error_message = None
@@ -511,8 +574,20 @@ def create_app() -> Flask:
             )
             if username_matches and password_matches:
                 session.clear()
+                session.permanent = True
                 session["authenticated"] = True
+                session["authenticated_at"] = time.time()
+                log_event(
+                    logger,
+                    "auth.login_succeeded",
+                    request_id=g.request_id,
+                )
                 return redirect(url_for("index"))
+            log_warning_event(
+                logger,
+                "auth.login_failed",
+                request_id=g.request_id,
+            )
             error_message = "Invalid username or password."
 
         return render_template("login.html", error_message=error_message), (

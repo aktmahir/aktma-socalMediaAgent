@@ -1,5 +1,8 @@
 name: Python tests
 
+permissions:
+  contents: read
+
 on:
   push:
     branches: [ main, master ]
@@ -8,18 +11,29 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.9", "3.10", "3.11", "3.12"]
+        include:
+          - python-version: "3.9"
+            os: ubuntu-22.04
+          - python-version: "3.10"
+            os: ubuntu-latest
+          - python-version: "3.11"
+            os: ubuntu-latest
+          - python-version: "3.12"
+            os: ubuntu-latest
+
+    runs-on: ${{ matrix.os }}
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: ${{ matrix.python-version }}
 
@@ -41,7 +55,9 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
 
       - name: Configure Compose secret
         run: |
@@ -60,13 +76,73 @@ jobs:
           docker compose ps --status running --services | grep -qx scheduler
           python - <<'PY'
           import json
+          import subprocess
           import time
+          from urllib.error import HTTPError
           from urllib.request import urlopen
+
+          expected_users = {
+              "app": "app",
+              "scheduler": "app",
+              "redis": "999:1000",
+              "prometheus": "nobody",
+          }
+          for service, expected_user in expected_users.items():
+              container_id = subprocess.check_output(
+                  ["docker", "compose", "ps", "-q", service],
+                  text=True,
+              ).strip()
+              if not container_id:
+                  raise SystemExit(f"The {service} container is not running.")
+              inspect = json.loads(
+                  subprocess.check_output(["docker", "inspect", container_id], text=True)
+              )[0]
+              if inspect["Config"]["User"] != expected_user:
+                  raise SystemExit(f"The {service} container is not running as {expected_user}.")
+              host_config = inspect["HostConfig"]
+              if not host_config["ReadonlyRootfs"]:
+                  raise SystemExit(f"The {service} root filesystem is writable.")
+              if "ALL" not in host_config["CapDrop"]:
+                  raise SystemExit(f"The {service} container retains Linux capabilities.")
+              if "no-new-privileges:true" not in host_config["SecurityOpt"]:
+                  raise SystemExit(f"The {service} container can gain privileges.")
+              if "/tmp" not in host_config["Tmpfs"]:
+                  raise SystemExit(f"The {service} container has no temporary filesystem.")
+
+          containers = {}
+          for service in ("app", "scheduler", "redis", "prometheus"):
+              container_id = subprocess.check_output(
+                  ["docker", "compose", "ps", "-q", service],
+                  text=True,
+              ).strip()
+              containers[service] = json.loads(
+                  subprocess.check_output(["docker", "inspect", container_id], text=True)
+              )[0]
+          redis_networks = set(containers["redis"]["NetworkSettings"]["Networks"])
+          app_networks = set(containers["app"]["NetworkSettings"]["Networks"])
+          if len(redis_networks) != 1 or not redis_networks.issubset(app_networks):
+              raise SystemExit("Redis is not isolated on its dedicated internal network.")
+          isolated_network = next(iter(redis_networks))
+          network = json.loads(
+              subprocess.check_output(["docker", "network", "inspect", isolated_network], text=True)
+          )[0]
+          if not network["Internal"]:
+              raise SystemExit("The Redis rate-limit network is not internal.")
+          for service in ("scheduler", "prometheus"):
+              attached_networks = set(
+                  containers[service]["NetworkSettings"]["Networks"]
+              )
+              if isolated_network in attached_networks:
+                  raise SystemExit(f"The {service} service can access Redis directly.")
 
           expected_rules = {
               "SocialMediaAgentUnavailable",
               "SocialMediaAgentHighServerErrorRate",
               "SocialMediaAgentHighP95Latency",
+              "SocialMediaAgentSchedulerMetricsUnavailable",
+              "SocialMediaAgentScheduledJobsFailed",
+              "SocialMediaAgentUnhandledErrors",
+              "SocialMediaAgentUnhandledErrors",
           }
           deadline = time.monotonic() + 180
           while time.monotonic() < deadline:
@@ -86,14 +162,48 @@ jobs:
                   }
                   if app_targets and all(target["health"] == "up" for target in app_targets):
                       missing_rules = expected_rules - loaded_rules
-                      if not missing_rules:
-                          print("Authenticated app scrape is up; all alert rules are loaded.")
+                      if missing_rules:
+                          time.sleep(2)
+                          continue
+                      with urlopen(
+                          "http://127.0.0.1:9090/api/v1/query"
+                          "?query=social_media_agent_scheduler_metrics_available",
+                          timeout=5,
+                      ) as response:
+                          availability = json.load(response)["data"]["result"]
+                      if availability and float(availability[0]["value"][1]) == 1:
+                          with urlopen(
+                              "http://127.0.0.1:9090/api/v1/query"
+                              "?query=social_media_agent_application_errors_total",
+                              timeout=5,
+                          ) as response:
+                              application_errors = json.load(response)["data"]["result"]
+                          if not application_errors:
+                              time.sleep(2)
+                              continue
+                          print(
+                              "Authenticated app scrape is up; scheduler metrics "
+                              "and error counters are available, and all alert rules "
+                              "are loaded."
+                          )
                           break
               except (OSError, KeyError, ValueError):
                   pass
               time.sleep(2)
           else:
               raise SystemExit("Prometheus did not report a healthy app scrape and all alert rules.")
+
+          try:
+              urlopen(
+                  "http://127.0.0.1:9090/-/reload",
+                  data=b"",
+                  timeout=5,
+              )
+          except HTTPError as error:
+              if error.code != 403:
+                  raise
+          else:
+              raise SystemExit("The unauthenticated Prometheus lifecycle API is enabled.")
           PY
 
       - name: Switch to TLS proxy stack
@@ -111,10 +221,44 @@ jobs:
           import http.client
           import json
           import ssl
+          import subprocess
           import time
           from urllib.request import urlopen
 
           context = ssl._create_unverified_context()
+          container_id = subprocess.check_output(
+              [
+                  "docker", "compose", "-f", "docker-compose.yml",
+                  "-f", "docker-compose.tls.yml", "ps", "-q", "tls_proxy",
+              ],
+              text=True,
+          ).strip()
+          if not container_id:
+              raise SystemExit("The TLS proxy container is not running.")
+          inspect = json.loads(
+              subprocess.check_output(["docker", "inspect", container_id], text=True)
+          )[0]
+          host_config = inspect["HostConfig"]
+          if not host_config["ReadonlyRootfs"]:
+              raise SystemExit("The TLS proxy root filesystem is writable.")
+          if "ALL" not in host_config["CapDrop"]:
+              raise SystemExit("The TLS proxy retains unexpected Linux capabilities.")
+          expected_capabilities = {
+              "CAP_NET_BIND_SERVICE",
+              "CAP_CHOWN",
+              "CAP_SETGID",
+              "CAP_SETUID",
+          }
+          if set(host_config["CapAdd"]) != expected_capabilities:
+              raise SystemExit("The TLS proxy has unexpected or missing Linux capabilities.")
+          if "no-new-privileges:true" not in host_config["SecurityOpt"]:
+              raise SystemExit("The TLS proxy can gain privileges.")
+          if not {"/etc/nginx/conf.d", "/var/cache/nginx", "/run"}.issubset(
+              host_config["Tmpfs"]
+          ):
+              raise SystemExit("The TLS proxy is missing a required bounded temporary filesystem.")
+          subprocess.run(["docker", "exec", container_id, "nginx", "-t"], check=True)
+
           deadline = time.monotonic() + 180
           while time.monotonic() < deadline:
               try:
@@ -132,15 +276,27 @@ jobs:
               connection.request("GET", "/health")
               redirect = connection.getresponse()
               location = redirect.getheader("Location", "")
+              server_header = redirect.getheader("Server", "")
               if redirect.status != 308 or not location.startswith("https://127.0.0.1:8443/"):
                   raise SystemExit("The HTTP listener did not redirect to the published HTTPS port.")
+              if server_header.lower().startswith("nginx/"):
+                  raise SystemExit("The HTTP listener discloses the Nginx version.")
           finally:
               connection.close()
 
           with urlopen("https://127.0.0.1:8443/login", context=context, timeout=5) as response:
               cookie = response.headers.get("Set-Cookie", "")
-              if "Secure" not in cookie or "HttpOnly" not in cookie:
-                  raise SystemExit("The TLS login session cookie is missing secure flags.")
+              server_header = response.headers.get("Server", "")
+              if (
+                  "__Host-session=" not in cookie
+                  or "Secure" not in cookie
+                  or "HttpOnly" not in cookie
+                  or "Path=/" not in cookie
+                  or "Domain=" in cookie
+              ):
+                  raise SystemExit("The TLS login session cookie is missing host-only secure attributes.")
+              if server_header.lower().startswith("nginx/"):
+                  raise SystemExit("The HTTPS listener discloses the Nginx version.")
           print("TLS proxy, HTTPS redirect, readiness, and secure cookies verified.")
           PY
 

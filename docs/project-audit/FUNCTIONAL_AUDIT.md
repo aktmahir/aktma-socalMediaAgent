@@ -19,7 +19,7 @@ As of 2026-11-11, the project provides local and Docker workflows for generating
 | Media uploads and analysis | Partial | Files are limited to 5 MB, checked against allowlisted extensions/signatures and selected media type, stored under random names, and parsed with resource limits. Optional ClamAV scanning may report unscanned; external OpenAI vision requires an explicit per-upload opt-in. |
 | Scheduling and recovery | Implemented for local and Docker use | SQLite persists job state, retry attempts, and generated payloads. CLI lifecycle controls, a Docker Compose supervisor, and an opt-in local supervisor are available; a Windows script can register current-user logon startup. Leases coordinate workers only when they use the same SQLite database. |
 | Operational visibility | Implemented for local use | `/health`, `/ready`, and SQLite-persisted `/metrics` are available. Unhandled web exceptions are logged locally and stored as bounded, data-minimized records; optional Sentry reporting requires an SDK extra and configured DSN. |
-| Automated tests and CI | Implemented; latest full local run passes; expanded matrix pending | All 117 tests passed locally. GitHub Actions is configured for Python 3.9–3.12 and smoke-tests the monitoring, scheduler-supervisor, and TLS Compose services; the updated workflow has not run. Provider and Sentry behavior remains mocked; tests make no live provider calls. |
+| Automated tests and CI | Implemented; Python 3.9 locally verified; GitHub rerun pending | All 126 tests passed on Windows and in a Python 3.9 container after dependency and package installation. GitHub Actions run 15 passed Python 3.10–3.12 and Docker monitoring checks. Python 3.9 failed during interpreter setup because `ubuntu-latest` resolved to Ubuntu 26.04; the job now targets Ubuntu 22.04 and needs a successful rerun. Provider and Sentry behavior remains mocked; tests make no live provider calls. |
 | Production deployment | Partial | A Gunicorn WSGI factory and loopback-only Docker Compose stack provide single-user auth, Redis rate-limit storage, Prometheus monitoring, secret-file mounts, and optional Nginx TLS termination. Public production deployment, external secret management/rotation, multi-user access, and alert notification routing remain unimplemented. |
 
 ## Verified workflows
@@ -29,6 +29,7 @@ As of 2026-11-11, the project provides local and Docker workflows for generating
 - A provider/API failure that returns local-template output is treated as a successful generation. `generation_source` distinguishes local fallback from provider output.
 - Uploaded images and videos are parsed locally within configured pixel/frame/time limits. FFprobe and FFmpeg are required for video analysis. An unchecked-by-default option sends prepared image data to OpenAI vision.
 - Session-backed CSRF protection and per-IP rate limits are enabled. Default limiter state is process-local; health, readiness, and metrics probes are exempt.
+- Browser responses include a restrictive Content Security Policy and other security headers; HSTS is sent only for HTTPS requests.
 
 ## Known limitations and local trust boundaries
 
@@ -38,7 +39,7 @@ As of 2026-11-11, the project provides local and Docker workflows for generating
 - Web-created workers stop with the web process. Docker Compose runs a separate supervisor that recovers abandoned running jobs after lease expiry; local supervisor/task setup remains an explicit operator action.
 - Optional single-user authentication protects local/Docker application routes when configured; Compose requires credentials. Multi-user authorization and external identity providers are absent. CSRF protection and rate limiting alone do not provide identity or access control.
 - Sentry reporting is opt-in. The event scrubber removes request/user payloads and arbitrary messages, but sanitized stack frames retain function names, line numbers, and source basenames. Local traceback logs contain exception details and require appropriate local access and retention controls.
-- `/ready` checks metrics, upload, and scheduled-output storage plus selected configuration conditions. It creates the configured scheduled-output root if needed. It does not verify provider credentials, scheduler-worker availability, or external monitoring delivery.
+- `/ready` checks metrics, upload, and scheduled-output storage plus selected configuration conditions. With browser auth enabled, unauthenticated probes receive only the aggregate state; individual check results require an authenticated session. It creates the configured scheduled-output root if needed. It does not verify provider credentials, scheduler-worker availability, or external monitoring delivery.
 
 ## Functional conclusion
 

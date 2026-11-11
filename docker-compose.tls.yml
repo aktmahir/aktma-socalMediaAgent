@@ -12,6 +12,20 @@ services:
 
   tls_proxy:
     image: nginx:1.28-alpine
+    read_only: true
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+      - CHOWN
+      - SETGID
+      - SETUID
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /etc/nginx/conf.d:rw,noexec,nosuid,size=1m
+      - /var/cache/nginx:rw,noexec,nosuid,size=16m,mode=1777
+      - /run:rw,noexec,nosuid,size=1m
     environment:
       TLS_HTTPS_PORT: ${TLS_HTTPS_PORT:-8443}
     ports:
@@ -33,10 +47,6 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
-
-  redis:
-    networks:
-      - app_backend
 
   scheduler:
     networks:

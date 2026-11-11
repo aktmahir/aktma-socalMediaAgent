@@ -21,6 +21,7 @@ class RequestMetrics:
         self._duration_counts: Dict[Tuple[str, int], int] = defaultdict(int)
         self._duration_sums: Dict[Tuple[str, int], float] = defaultdict(float)
         self._duration_buckets: Dict[Tuple[str, int, float], int] = defaultdict(int)
+        self._error_count = 0
         self.database_path = Path(database_path) if database_path is not None else None
         if self.database_path is not None:
             self.database_path.parent.mkdir(parents=True, exist_ok=True)
@@ -64,6 +65,20 @@ class RequestMetrics:
                 )
                 """
             )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS application_error_totals (
+                    id INTEGER PRIMARY KEY CHECK (id = 1),
+                    error_count INTEGER NOT NULL DEFAULT 0
+                )
+                """
+            )
+            connection.execute(
+                """
+                INSERT OR IGNORE INTO application_error_totals (id, error_count)
+                VALUES (1, 0)
+                """
+            )
             connection.commit()
         finally:
             connection.close()
@@ -73,8 +88,11 @@ class RequestMetrics:
         try:
             connection.execute("BEGIN IMMEDIATE")
             connection.execute("SELECT 1 FROM http_request_metrics LIMIT 1").fetchone()
+            error_counter = connection.execute(
+                "SELECT error_count FROM application_error_totals WHERE id = 1"
+            ).fetchone()
             connection.rollback()
-            return True
+            return error_counter is not None
         finally:
             connection.close()
 
@@ -136,6 +154,8 @@ class RequestMetrics:
 
     def report_error(self, request_id: str, method: str, path: str, error_type: str) -> None:
         if self.database_path is None:
+            with self._lock:
+                self._error_count += 1
             return
         connection = self._connect()
         try:
@@ -151,6 +171,13 @@ class RequestMetrics:
                     path,
                     error_type,
                 ),
+            )
+            connection.execute(
+                """
+                UPDATE application_error_totals
+                SET error_count = error_count + 1
+                WHERE id = 1
+                """
             )
             connection.execute(
                 """
@@ -174,12 +201,14 @@ class RequestMetrics:
             request_counts, duration_counts, duration_sums, duration_buckets = (
                 self._load_persisted_metrics()
             )
+            error_count = self._load_persisted_error_count()
         else:
             with self._lock:
                 request_counts = dict(self._request_counts)
                 duration_counts = dict(self._duration_counts)
                 duration_sums = dict(self._duration_sums)
                 duration_buckets = dict(self._duration_buckets)
+                error_count = self._error_count
 
         for (method, status_code), count in sorted(request_counts.items()):
             labels = f'method="{method}",status_code="{status_code}"'
@@ -212,7 +241,24 @@ class RequestMetrics:
                 f"social_media_agent_http_request_duration_seconds_count{{{labels}}} "
                 f"{duration_counts[(method, status_code)]}"
             )
+        lines.extend(
+            (
+                "# HELP social_media_agent_application_errors_total Total unhandled application errors.",
+                "# TYPE social_media_agent_application_errors_total counter",
+                f"social_media_agent_application_errors_total {error_count}",
+            )
+        )
         return "\n".join(lines) + "\n"
+
+    def _load_persisted_error_count(self) -> int:
+        connection = self._connect()
+        try:
+            row = connection.execute(
+                "SELECT error_count FROM application_error_totals WHERE id = 1"
+            ).fetchone()
+            return int(row[0]) if row is not None else 0
+        finally:
+            connection.close()
 
     def _load_persisted_metrics(self):
         connection = self._connect()
@@ -237,6 +283,64 @@ class RequestMetrics:
             for index, bucket in enumerate(self.DURATION_BUCKETS):
                 duration_buckets[(method, status_code, bucket)] = int(row[4 + index])
         return request_counts, duration_counts, duration_sums, duration_buckets
+
+
+class SchedulerMetrics:
+    JOB_STATUSES = ("pending", "running", "paused", "completed", "failed", "unknown")
+
+    def __init__(self, database_path: Path) -> None:
+        self.database_path = Path(database_path)
+
+    def render_prometheus(self) -> str:
+        lines = [
+            "# HELP social_media_agent_scheduler_metrics_available Whether the scheduler database is available.",
+            "# TYPE social_media_agent_scheduler_metrics_available gauge",
+        ]
+        if not self.database_path.is_file():
+            lines.append("social_media_agent_scheduler_metrics_available 0")
+            return self._render_job_counts(lines, {})
+
+        database_uri = f"file:{self.database_path.resolve().as_posix()}?mode=ro"
+        connection = sqlite3.connect(database_uri, uri=True, timeout=5)
+        try:
+            table = connection.execute(
+                """
+                SELECT 1 FROM sqlite_master
+                WHERE type = 'table' AND name = 'scheduled_jobs'
+                """
+            ).fetchone()
+            if table is None:
+                lines.append("social_media_agent_scheduler_metrics_available 0")
+                return self._render_job_counts(lines, {})
+            rows = connection.execute(
+                "SELECT status, COUNT(*) FROM scheduled_jobs GROUP BY status"
+            ).fetchall()
+        finally:
+            connection.close()
+
+        lines.append("social_media_agent_scheduler_metrics_available 1")
+        counts = {status: 0 for status in self.JOB_STATUSES}
+        for status, count in rows:
+            label = str(status)
+            if label not in counts:
+                label = "unknown"
+            counts[label] += int(count)
+        return self._render_job_counts(lines, counts)
+
+    @staticmethod
+    def _render_job_counts(lines: list[str], counts: Dict[str, int]) -> str:
+        lines.extend(
+            (
+                "# HELP social_media_agent_scheduled_jobs Number of scheduled jobs by status.",
+                "# TYPE social_media_agent_scheduled_jobs gauge",
+            )
+        )
+        for status in SchedulerMetrics.JOB_STATUSES:
+            lines.append(
+                f'social_media_agent_scheduled_jobs{{status="{status}"}} '
+                f"{counts.get(status, 0)}"
+            )
+        return "\n".join(lines) + "\n"
 
 
 def configure_logging() -> None:
@@ -284,6 +388,13 @@ def configure_logging() -> None:
 
 def log_event(logger: logging.Logger, event: str, **fields: Any) -> None:
     logger.info(
+        "%s",
+        json.dumps({"event": event, **fields}, sort_keys=True, separators=(",", ":")),
+    )
+
+
+def log_warning_event(logger: logging.Logger, event: str, **fields: Any) -> None:
+    logger.warning(
         "%s",
         json.dumps({"event": event, **fields}, sort_keys=True, separators=(",", ":")),
     )

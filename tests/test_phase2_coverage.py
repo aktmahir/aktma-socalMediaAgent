@@ -19,6 +19,7 @@ from PIL import Image
 import app as cli_module
 from social_media_agent.observability import (
     RequestMetrics,
+    SchedulerMetrics,
     configure_sentry,
     configure_logging,
     scrub_sentry_event,
@@ -26,6 +27,7 @@ from social_media_agent.observability import (
 from social_media_agent.scheduler import PeriodicPostScheduler
 from social_media_agent.web import (
     MAX_UPLOAD_BYTES,
+    WEB_SESSION_MAX_AGE_SECONDS,
     _has_matching_signature,
     _resolve_scheduled_output,
     create_app,
@@ -132,6 +134,58 @@ class PhaseTwoCoverageTests(unittest.TestCase):
         self.assertEqual(logout.status_code, 302)
         self.assertEqual(signed_out_page.status_code, 302)
         self.assertEqual(signed_out_page.headers["Location"], "/login")
+
+    def test_secure_sessions_use_host_cookie_prefix(self) -> None:
+        for secure, expected_name in (
+            ("false", "session"),
+            ("true", "__Host-session"),
+        ):
+            with self.subTest(secure=secure), patch.dict(
+                os.environ,
+                {
+                    "SESSION_COOKIE_SECURE": secure,
+                    "WEB_AUTH_USERNAME": "operator",
+                    "WEB_AUTH_PASSWORD": "a sufficiently long password",
+                },
+            ), patch(
+                "social_media_agent.web.SocialMediaPostGenerator",
+                return_value=Mock(),
+            ):
+                response = create_app().test_client().get("/login")
+                cookie = response.headers.get("Set-Cookie", "")
+
+            self.assertIn(f"{expected_name}=", cookie)
+            self.assertIn("Path=/", cookie)
+            self.assertIn("HttpOnly", cookie)
+            if secure == "true":
+                self.assertIn("Secure", cookie)
+                self.assertNotIn("Domain=", cookie)
+            else:
+                self.assertNotIn("Secure", cookie)
+
+    def test_authenticated_session_expires_after_maximum_lifetime(self) -> None:
+        credentials = {
+            "WEB_AUTH_USERNAME": "operator",
+            "WEB_AUTH_PASSWORD": "a sufficiently long password",
+        }
+        with patch.dict(os.environ, credentials), patch(
+            "social_media_agent.web.SocialMediaPostGenerator",
+            return_value=Mock(),
+        ):
+            client = create_app().test_client()
+            with client.session_transaction() as browser_session:
+                browser_session.permanent = True
+                browser_session["authenticated"] = True
+                browser_session["authenticated_at"] = (
+                    time.time() - WEB_SESSION_MAX_AGE_SECONDS
+                )
+
+            response = client.get("/")
+
+            self.assertEqual(response.status_code, 302)
+            self.assertEqual(response.headers["Location"], "/login")
+            with client.session_transaction() as browser_session:
+                self.assertNotIn("authenticated", browser_session)
 
     def test_prometheus_scrape_uses_basic_auth(self) -> None:
         credentials = {
@@ -299,6 +353,71 @@ class PhaseTwoCoverageTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 401)
         self.assertIn("Invalid username or password.", response.get_data(as_text=True))
+
+    def test_authentication_outcomes_are_logged_without_credentials(self) -> None:
+        credentials = {
+            "WEB_AUTH_USERNAME": "operator-secret",
+            "WEB_AUTH_PASSWORD": "password-secret-value",
+        }
+        with patch.dict(os.environ, credentials), patch(
+            "social_media_agent.web.SocialMediaPostGenerator",
+            return_value=Mock(),
+        ):
+            client = create_app().test_client()
+            page = client.get("/login")
+            token = re.search(
+                r'<input type="hidden" name="csrf_token" value="([^"]+)"',
+                page.get_data(as_text=True),
+            ).group(1)
+            with self.assertLogs("social_media_agent.web", level="INFO") as captured:
+                failed_response = client.post(
+                    "/login",
+                    data={
+                        "csrf_token": token,
+                        "username": credentials["WEB_AUTH_USERNAME"],
+                        "password": "wrong-secret-value",
+                    },
+                )
+                failed_request_id = failed_response.headers["X-Request-ID"]
+                token = re.search(
+                    r'<input type="hidden" name="csrf_token" value="([^"]+)"',
+                    failed_response.get_data(as_text=True),
+                ).group(1)
+                successful_response = client.post(
+                    "/login",
+                    data={
+                        "csrf_token": token,
+                        "username": credentials["WEB_AUTH_USERNAME"],
+                        "password": credentials["WEB_AUTH_PASSWORD"],
+                    },
+                )
+                successful_request_id = successful_response.headers["X-Request-ID"]
+
+        events = [
+            json.loads(record.getMessage())
+            for record in captured.records
+            if record.getMessage().startswith("{")
+        ]
+        auth_events = [
+            event for event in events if event["event"].startswith("auth.login_")
+        ]
+        self.assertEqual(
+            auth_events,
+            [
+                {
+                    "event": "auth.login_failed",
+                    "request_id": failed_request_id,
+                },
+                {
+                    "event": "auth.login_succeeded",
+                    "request_id": successful_request_id,
+                },
+            ],
+        )
+        self.assertEqual(captured.records[0].levelname, "WARNING")
+        self.assertNotIn(credentials["WEB_AUTH_USERNAME"], captured.output[0])
+        self.assertNotIn(credentials["WEB_AUTH_PASSWORD"], captured.output[0])
+        self.assertNotIn("wrong-secret-value", captured.output[0])
 
     def test_single_user_auth_requires_complete_credentials(self) -> None:
         with patch.dict(os.environ, {"WEB_AUTH_USERNAME": "operator", "WEB_AUTH_PASSWORD": ""}), patch(
@@ -482,6 +601,59 @@ class PhaseTwoCoverageTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.get_json(), {"status": "ok"})
 
+    def test_responses_include_security_headers_and_https_only_hsts(self) -> None:
+        with patch("social_media_agent.web.SocialMediaPostGenerator", return_value=Mock()):
+            client = create_app().test_client()
+            http_response = client.get("/health")
+            page = client.get("/")
+            stylesheet = client.get("/static/index.css")
+            https_response = client.get("/health", base_url="https://localhost")
+            self.addCleanup(stylesheet.close)
+
+        with patch.dict(
+            os.environ,
+            {
+                "WEB_AUTH_USERNAME": "operator",
+                "WEB_AUTH_PASSWORD": "a sufficiently long password",
+            },
+        ), patch("social_media_agent.web.SocialMediaPostGenerator", return_value=Mock()):
+            auth_client = create_app().test_client()
+            login_page = auth_client.get("/login")
+            login_stylesheet = auth_client.get("/static/login.css")
+            self.addCleanup(login_stylesheet.close)
+
+        self.assertIn("default-src 'self'", http_response.headers["Content-Security-Policy"])
+        self.assertIn("frame-ancestors 'none'", http_response.headers["Content-Security-Policy"])
+        self.assertIn("style-src 'self'", http_response.headers["Content-Security-Policy"])
+        self.assertNotIn(
+            "'unsafe-inline'",
+            http_response.headers["Content-Security-Policy"],
+        )
+        self.assertIn('href="/static/index.css"', page.get_data(as_text=True))
+        self.assertIn('href="/static/login.css"', login_page.get_data(as_text=True))
+        self.assertEqual(page.headers["Cache-Control"], "no-store")
+        self.assertEqual(login_page.headers["Cache-Control"], "no-store")
+        self.assertNotIn("Cache-Control", http_response.headers)
+        self.assertEqual(stylesheet.status_code, 200)
+        self.assertIn("text/css", stylesheet.content_type)
+        self.assertEqual(login_stylesheet.status_code, 200)
+        self.assertIn("text/css", login_stylesheet.content_type)
+        self.assertEqual(http_response.headers["X-Content-Type-Options"], "nosniff")
+        self.assertEqual(http_response.headers["X-Frame-Options"], "DENY")
+        self.assertEqual(
+            http_response.headers["Referrer-Policy"],
+            "strict-origin-when-cross-origin",
+        )
+        self.assertEqual(
+            http_response.headers["Permissions-Policy"],
+            "camera=(), microphone=(), geolocation=()",
+        )
+        self.assertNotIn("Strict-Transport-Security", http_response.headers)
+        self.assertEqual(
+            https_response.headers["Strict-Transport-Security"],
+            "max-age=31536000",
+        )
+
     def test_web_launcher_binds_to_localhost_without_debug_mode(self) -> None:
         web_app = SimpleNamespace(run=Mock())
         with patch("social_media_agent.web.configure_logging"), patch(
@@ -576,12 +748,37 @@ class PhaseTwoCoverageTests(unittest.TestCase):
             app.config["SESSION_COOKIE_SECURE"] = True
             app.config["RATELIMIT_SHARED_STORAGE"] = True
             with patch.object(limiter.storage, "check", return_value=True):
-                response = app.test_client().get("/ready")
+                client = app.test_client()
+                public_response = client.get("/ready")
+                with client.session_transaction() as browser_session:
+                    browser_session["authenticated"] = True
+                    browser_session["authenticated_at"] = time.time()
+                authenticated_response = client.get("/ready")
 
-            self.assertEqual(response.status_code, 200)
-            self.assertEqual(response.get_json()["status"], "ready")
-            self.assertTrue(all(response.get_json()["checks"].values()))
+            self.assertEqual(public_response.status_code, 200)
+            self.assertEqual(public_response.get_json(), {"status": "ready"})
+            self.assertEqual(authenticated_response.status_code, 200)
+            self.assertEqual(authenticated_response.get_json()["status"], "ready")
+            self.assertTrue(
+                all(authenticated_response.get_json()["checks"].values())
+            )
             self.assertTrue(output_root.is_dir())
+
+    def test_readiness_route_hides_failed_check_details_when_auth_is_enabled(self) -> None:
+        credentials = {
+            "WEB_AUTH_USERNAME": "operator",
+            "WEB_AUTH_PASSWORD": "a sufficiently long password",
+            "FLASK_SECRET_KEY": "",
+            "RATELIMIT_STORAGE_URI": "memory://",
+        }
+        with patch.dict(os.environ, credentials), patch(
+            "social_media_agent.web.SocialMediaPostGenerator",
+            return_value=Mock(),
+        ):
+            response = create_app().test_client().get("/ready")
+
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.get_json(), {"status": "not_ready"})
 
     def test_readiness_route_detects_unwritable_scheduled_output_root(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -665,6 +862,106 @@ class PhaseTwoCoverageTests(unittest.TestCase):
             output,
         )
 
+    def test_scheduler_metrics_report_unavailable_database(self) -> None:
+        metrics = SchedulerMetrics(Path(self.observability_dir.name) / "missing.sqlite3")
+
+        output = metrics.render_prometheus()
+
+        self.assertIn("social_media_agent_scheduler_metrics_available 0", output)
+        self.assertIn(
+            'social_media_agent_scheduled_jobs{status="failed"} 0',
+            output,
+        )
+
+    def test_scheduler_metrics_report_job_counts_with_bounded_statuses(self) -> None:
+        database_path = (
+            Path(self.observability_dir.name) / "scheduler data" / "scheduler.sqlite3"
+        )
+        scheduler = PeriodicPostScheduler(
+            Mock(),
+            output_dir=self.observability_dir.name,
+            database_path=str(database_path),
+        )
+        scheduler.create_job({"topic": "one"}, interval_seconds=60, count=1)
+        failed_job_id = scheduler.create_job(
+            {"topic": "two"},
+            interval_seconds=60,
+            count=1,
+        )
+        unknown_job_id = scheduler.create_job(
+            {"topic": "three"},
+            interval_seconds=60,
+            count=1,
+        )
+        connection = sqlite3.connect(database_path)
+        try:
+            connection.execute(
+                "UPDATE scheduled_jobs SET status = ? WHERE id = ?",
+                ("failed", failed_job_id),
+            )
+            connection.execute(
+                "UPDATE scheduled_jobs SET status = ? WHERE id = ?",
+                ("unexpected-private-state", unknown_job_id),
+            )
+            connection.commit()
+        finally:
+            connection.close()
+
+        output = SchedulerMetrics(database_path).render_prometheus()
+
+        self.assertIn("social_media_agent_scheduler_metrics_available 1", output)
+        self.assertIn(
+            'social_media_agent_scheduled_jobs{status="running"} 1',
+            output,
+        )
+        self.assertIn(
+            'social_media_agent_scheduled_jobs{status="failed"} 1',
+            output,
+        )
+        self.assertIn(
+            'social_media_agent_scheduled_jobs{status="unknown"} 1',
+            output,
+        )
+        self.assertNotIn("unexpected-private-state", output)
+
+    def test_metrics_endpoint_includes_configured_scheduler_job_counts(self) -> None:
+        database_path = Path(self.observability_dir.name) / "configured-scheduler.sqlite3"
+        scheduler = PeriodicPostScheduler(
+            Mock(),
+            output_dir=self.observability_dir.name,
+            database_path=str(database_path),
+        )
+        failed_job_id = scheduler.create_job(
+            {"topic": "failure"},
+            interval_seconds=60,
+            count=1,
+        )
+        connection = sqlite3.connect(database_path)
+        try:
+            connection.execute(
+                "UPDATE scheduled_jobs SET status = 'failed' WHERE id = ?",
+                (failed_job_id,),
+            )
+            connection.commit()
+        finally:
+            connection.close()
+
+        with patch.dict(os.environ, {"SCHEDULER_DB_PATH": str(database_path)}), patch(
+            "social_media_agent.web.SocialMediaPostGenerator",
+            return_value=Mock(),
+        ):
+            response = create_app().test_client().get("/metrics")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(
+            "social_media_agent_scheduler_metrics_available 1",
+            response.get_data(as_text=True),
+        )
+        self.assertIn(
+            'social_media_agent_scheduled_jobs{status="failed"} 1',
+            response.get_data(as_text=True),
+        )
+
     def test_persistent_error_reporting_retains_only_recent_events(self) -> None:
         database_path = Path(self.observability_dir.name) / "retained-errors.sqlite3"
         metrics = RequestMetrics(database_path)
@@ -681,6 +978,29 @@ class PhaseTwoCoverageTests(unittest.TestCase):
             connection.close()
 
         self.assertEqual(retained, [("second",), ("third",)])
+        self.assertIn(
+            "social_media_agent_application_errors_total 3",
+            RequestMetrics(database_path).render_prometheus(),
+        )
+
+    def test_application_error_counter_is_persistent_and_in_memory(self) -> None:
+        database_path = Path(self.observability_dir.name) / "persistent-errors.sqlite3"
+        first_instance = RequestMetrics(database_path)
+        first_instance.report_error("first", "GET", "/", "RuntimeError")
+        first_instance.report_error("second", "POST", "/", "ValueError")
+
+        restored_instance = RequestMetrics(database_path)
+        self.assertIn(
+            "social_media_agent_application_errors_total 2",
+            restored_instance.render_prometheus(),
+        )
+
+        in_memory = RequestMetrics()
+        in_memory.report_error("first", "GET", "/", "RuntimeError")
+        self.assertIn(
+            "social_media_agent_application_errors_total 1",
+            in_memory.render_prometheus(),
+        )
 
     def test_configure_logging_rotates_file_at_configured_size(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

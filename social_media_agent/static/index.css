@@ -1,0 +1,84 @@
+body {
+  font-family: Arial, sans-serif;
+  margin: 0;
+  padding: 0;
+  background: #f6f8fc;
+}
+.page {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 24px;
+}
+.card {
+  background: #fff;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.05);
+  border-radius: 16px;
+  padding: 28px;
+}
+.field {
+  margin-bottom: 18px;
+}
+label {
+  display: block;
+  margin-bottom: 8px;
+  font-weight: 600;
+}
+input,
+select,
+textarea {
+  width: 100%;
+  padding: 12px 14px;
+  border: 1px solid #d9dde5;
+  border-radius: 10px;
+  font-size: 14px;
+}
+input[type="checkbox"] {
+  width: auto;
+  padding: 0;
+  border: 0;
+}
+button {
+  padding: 12px 20px;
+  border: none;
+  border-radius: 10px;
+  background: #3b82f6;
+  color: white;
+  cursor: pointer;
+  font-size: 15px;
+}
+button:hover {
+  background: #2563eb;
+}
+.status-message {
+  padding: 14px;
+  border-radius: 12px;
+}
+.status-error {
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  color: #991b1b;
+}
+.status-success {
+  background: #ecfdf5;
+  border: 1px solid #d1fae5;
+  color: #065f46;
+}
+.status-warning {
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+  color: #92400e;
+}
+.result {
+  margin-top: 24px;
+  border-top: 1px solid #e5e7eb;
+  padding-top: 24px;
+}
+.badge {
+  display: inline-block;
+  margin: 4px 6px 4px 0;
+  padding: 8px 12px;
+  background: #eef2ff;
+  color: #3730a3;
+  border-radius: 999px;
+  font-size: 13px;
+}
