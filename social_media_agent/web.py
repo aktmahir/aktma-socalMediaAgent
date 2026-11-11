@@ -1,3 +1,4 @@
+import ipaddress
 import logging
 import os
 import secrets
@@ -7,14 +8,15 @@ import time
 import uuid
 from pathlib import Path
 from threading import Thread
-from typing import Callable
+from typing import Callable, Union
 
-from flask import Flask, Response, g, jsonify, render_template, request
+from flask import Flask, Response, g, jsonify, redirect, render_template, request, session, url_for
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from flask_wtf.csrf import CSRFError, CSRFProtect
 from werkzeug.datastructures import FileStorage
 from werkzeug.exceptions import HTTPException, RequestEntityTooLarge
+from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.utils import secure_filename
 
 from .generator import SocialMediaPostGenerator
@@ -130,13 +132,114 @@ def _save_uploaded_media(
     return stored_name
 
 
+def _resolve_scheduled_output(value: str, output_root: Path) -> Path:
+    root = output_root.expanduser().resolve()
+    requested_path = Path(value).expanduser() if value else Path(".")
+    candidate = requested_path if requested_path.is_absolute() else root / requested_path
+    try:
+        resolved = candidate.resolve()
+        resolved.relative_to(root)
+    except (OSError, RuntimeError, ValueError) as error:
+        raise ValueError(
+            "Scheduled output folder must be within the configured output root."
+        ) from error
+    return resolved
+
+
+def _request_route() -> str:
+    return request.url_rule.rule if request.url_rule is not None else "<unmatched>"
+
+
+def _configured_secret(name: str) -> str:
+    value = os.environ.get(name, "")
+    file_path = os.environ.get(f"{name}_FILE", "").strip()
+    if value and file_path:
+        raise RuntimeError(f"Configure only one of {name} and {name}_FILE.")
+    if not file_path:
+        return value
+    try:
+        secret = Path(file_path).expanduser().read_text(encoding="utf-8").rstrip("\r\n")
+    except OSError as error:
+        raise RuntimeError(f"Unable to read configured {name}_FILE.") from error
+    if not secret:
+        raise RuntimeError(f"Configured {name}_FILE is empty.")
+    return secret
+
+
+class _TrustedProxyMiddleware:
+    def __init__(
+        self,
+        app: Callable,
+        trusted_proxy_ip: Union[ipaddress.IPv4Address, ipaddress.IPv6Address],
+    ) -> None:
+        self.app = app
+        self.trusted_proxy_ip = trusted_proxy_ip
+
+    def __call__(self, environ, start_response):
+        try:
+            peer_ip = ipaddress.ip_address(environ.get("REMOTE_ADDR", ""))
+        except ValueError:
+            peer_ip = None
+        if peer_ip != self.trusted_proxy_ip:
+            for name in (
+                "HTTP_X_FORWARDED_FOR",
+                "HTTP_X_FORWARDED_HOST",
+                "HTTP_X_FORWARDED_PROTO",
+            ):
+                environ.pop(name, None)
+        return self.app(environ, start_response)
+
+
 def create_app() -> Flask:
     app = Flask(__name__, template_folder="templates")
-    configured_secret = os.environ.get("FLASK_SECRET_KEY", "")
+    configured_secret = _configured_secret("FLASK_SECRET_KEY")
+    auth_username = os.environ.get("WEB_AUTH_USERNAME", "")
+    auth_password = _configured_secret("WEB_AUTH_PASSWORD")
+    prometheus_username = os.environ.get("PROMETHEUS_USERNAME", "")
+    prometheus_password = _configured_secret("PROMETHEUS_PASSWORD")
+    if bool(auth_username) != bool(auth_password):
+        raise RuntimeError(
+            "WEB_AUTH_USERNAME and WEB_AUTH_PASSWORD must be configured together."
+        )
+    if auth_password and len(auth_password) < 16:
+        raise RuntimeError("WEB_AUTH_PASSWORD must be at least 16 characters long.")
+    if bool(prometheus_username) != bool(prometheus_password):
+        raise RuntimeError(
+            "PROMETHEUS_USERNAME and PROMETHEUS_PASSWORD must be configured together."
+        )
+    if prometheus_password and len(prometheus_password) < 16:
+        raise RuntimeError("PROMETHEUS_PASSWORD must be at least 16 characters long.")
+    try:
+        trusted_proxy_hops = int(os.environ.get("TRUSTED_PROXY_HOPS", "0"))
+    except ValueError as error:
+        raise RuntimeError("TRUSTED_PROXY_HOPS must be a non-negative integer.") from error
+    if trusted_proxy_hops < 0:
+        raise RuntimeError("TRUSTED_PROXY_HOPS must be a non-negative integer.")
+    trusted_proxy_value = os.environ.get("TRUSTED_PROXY_IP", "").strip()
+    if trusted_proxy_hops and not trusted_proxy_value:
+        raise RuntimeError(
+            "TRUSTED_PROXY_IP must identify the proxy when TRUSTED_PROXY_HOPS is set."
+        )
+    if trusted_proxy_value and not trusted_proxy_hops:
+        raise RuntimeError("TRUSTED_PROXY_HOPS must be set when TRUSTED_PROXY_IP is configured.")
+    try:
+        trusted_proxy_ip = (
+            ipaddress.ip_address(trusted_proxy_value) if trusted_proxy_value else None
+        )
+    except ValueError as error:
+        raise RuntimeError("TRUSTED_PROXY_IP must be a valid IP address.") from error
     limiter_storage_uri = os.environ.get("RATELIMIT_STORAGE_URI", "memory://")
     app.config.update(
         SECRET_KEY=configured_secret or secrets.token_hex(32),
         PRODUCTION_SECRET_CONFIGURED=len(configured_secret.encode("utf-8")) >= 32,
+        WEB_AUTH_USERNAME=auth_username,
+        WEB_AUTH_PASSWORD=auth_password,
+        AUTHENTICATION_CONFIGURED=bool(auth_username and auth_password),
+        PROMETHEUS_USERNAME=prometheus_username,
+        PROMETHEUS_PASSWORD=prometheus_password,
+        PROMETHEUS_AUTH_CONFIGURED=bool(prometheus_username and prometheus_password),
+        TRUSTED_PROXY_HOPS=trusted_proxy_hops,
+        TRUSTED_PROXY_IP=str(trusted_proxy_ip) if trusted_proxy_ip else "",
         RATELIMIT_STORAGE_URI=limiter_storage_uri,
         RATELIMIT_SHARED_STORAGE=not limiter_storage_uri.startswith("memory://"),
         SESSION_COOKIE_SECURE=os.environ.get("SESSION_COOKIE_SECURE", "").lower()
@@ -145,12 +248,31 @@ def create_app() -> Flask:
             "OBSERVABILITY_DB_PATH",
             str(Path.cwd() / "scheduled_posts" / "observability.sqlite3"),
         ),
+        SCHEDULED_OUTPUT_ROOT=str(
+            Path(
+                os.environ.get(
+                    "SCHEDULED_OUTPUT_ROOT",
+                    str(Path.cwd() / "scheduled_posts"),
+                )
+            ).expanduser().resolve()
+        ),
+        SCHEDULER_DB_PATH=os.environ.get("SCHEDULER_DB_PATH", "").strip(),
         SENTRY_DSN=os.environ.get("SENTRY_DSN", ""),
         SENTRY_ENVIRONMENT=os.environ.get("SENTRY_ENVIRONMENT", "development"),
         RATELIMIT_HEADERS_ENABLED=True,
         SESSION_COOKIE_HTTPONLY=True,
         SESSION_COOKIE_SAMESITE="Lax",
     )
+    if trusted_proxy_ip:
+        app.wsgi_app = _TrustedProxyMiddleware(
+            ProxyFix(
+                app.wsgi_app,
+                x_for=trusted_proxy_hops,
+                x_proto=trusted_proxy_hops,
+                x_host=trusted_proxy_hops,
+            ),
+            trusted_proxy_ip,
+        )
     app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
     app.config["MAX_CONTENT_LENGTH"] = MAX_REQUEST_BYTES
     limiter = Limiter(
@@ -180,7 +302,7 @@ def create_app() -> Flask:
             "language": "English",
             "interval": "",
             "count": 0,
-            "scheduled_output": "scheduled_posts",
+            "scheduled_output": "",
             "provider_vision": False,
         }
 
@@ -189,13 +311,43 @@ def create_app() -> Flask:
         g.request_id = uuid.uuid4().hex
         g.request_started_at = time.perf_counter()
 
+    @app.before_request
+    def require_authentication():
+        if request.endpoint == "metrics" and app.config["PROMETHEUS_AUTH_CONFIGURED"]:
+            authorization = request.authorization
+            if authorization is not None:
+                username_matches = secrets.compare_digest(
+                    (authorization.username or "").encode("utf-8"),
+                    app.config["PROMETHEUS_USERNAME"].encode("utf-8"),
+                )
+                password_matches = secrets.compare_digest(
+                    (authorization.password or "").encode("utf-8"),
+                    app.config["PROMETHEUS_PASSWORD"].encode("utf-8"),
+                )
+                if username_matches and password_matches:
+                    return None
+            if (
+                not app.config["AUTHENTICATION_CONFIGURED"]
+                or session.get("authenticated") is not True
+            ):
+                response = Response(status=401)
+                response.headers["WWW-Authenticate"] = 'Basic realm="metrics"'
+                return response
+        if not app.config["AUTHENTICATION_CONFIGURED"]:
+            return None
+        if request.endpoint in {"login", "health", "readiness", "static"}:
+            return None
+        if session.get("authenticated") is True:
+            return None
+        return redirect(url_for("login"))
+
     @app.after_request
     def log_request(response):
         request_id = getattr(g, "request_id", None)
         if request_id is not None:
             response.headers["X-Request-ID"] = request_id
             duration_ms = round((time.perf_counter() - g.request_started_at) * 1000, 2)
-            if request.path != "/metrics":
+            if request.endpoint != "metrics":
                 try:
                     request_metrics.observe_request(
                         request.method,
@@ -214,7 +366,7 @@ def create_app() -> Flask:
                     "http.request",
                     request_id=request_id,
                     method=request.method,
-                    path=request.path,
+                    route=_request_route(),
                     status_code=response.status_code,
                     duration_ms=duration_ms,
                 )
@@ -252,9 +404,23 @@ def create_app() -> Flask:
             with tempfile.TemporaryFile(dir=app.config["UPLOAD_FOLDER"]):
                 return True
 
+        def scheduled_output_storage_is_writable() -> bool:
+            output_root = Path(app.config["SCHEDULED_OUTPUT_ROOT"])
+            output_root.mkdir(parents=True, exist_ok=True)
+            with tempfile.TemporaryFile(dir=output_root):
+                return True
+
         checks = {
             "metrics_storage": check("metrics_storage", request_metrics.check_storage),
             "upload_storage": check("upload_storage", upload_storage_is_writable),
+            "scheduled_output_storage": check(
+                "scheduled_output_storage",
+                scheduled_output_storage_is_writable,
+            ),
+            "authentication_configured": bool(app.config["AUTHENTICATION_CONFIGURED"]),
+            "prometheus_auth_configured": bool(
+                app.config["PROMETHEUS_AUTH_CONFIGURED"]
+            ),
             "session_secret": bool(app.config["PRODUCTION_SECRET_CONFIGURED"]),
             "secure_session_cookie": bool(app.config["SESSION_COOKIE_SECURE"]),
             "debug_mode_disabled": not app.debug,
@@ -296,7 +462,7 @@ def create_app() -> Flask:
         error_fields = {
             "request_id": request_id,
             "method": request.method,
-            "path": request.path,
+            "path": _request_route(),
             "error_type": type(error).__name__,
         }
         log_exception_event(logger, "http.unhandled_exception", **error_fields)
@@ -324,6 +490,39 @@ def create_app() -> Flask:
             500,
             {"Content-Type": "text/plain; charset=utf-8"},
         )
+
+    @app.route("/login", methods=["GET", "POST"])
+    @limiter.limit("5 per minute", methods=["POST"], override_defaults=False)
+    def login():
+        if not app.config["AUTHENTICATION_CONFIGURED"]:
+            return redirect(url_for("index"))
+        if session.get("authenticated") is True:
+            return redirect(url_for("index"))
+
+        error_message = None
+        if request.method == "POST":
+            username_matches = secrets.compare_digest(
+                request.form.get("username", "").encode("utf-8"),
+                app.config["WEB_AUTH_USERNAME"].encode("utf-8"),
+            )
+            password_matches = secrets.compare_digest(
+                request.form.get("password", "").encode("utf-8"),
+                app.config["WEB_AUTH_PASSWORD"].encode("utf-8"),
+            )
+            if username_matches and password_matches:
+                session.clear()
+                session["authenticated"] = True
+                return redirect(url_for("index"))
+            error_message = "Invalid username or password."
+
+        return render_template("login.html", error_message=error_message), (
+            401 if error_message else 200
+        )
+
+    @app.post("/logout")
+    def logout():
+        session.clear()
+        return redirect(url_for("login" if app.config["AUTHENTICATION_CONFIGURED"] else "index"))
 
     @app.route("/", methods=["GET", "POST"])
     @limiter.limit("10 per minute", methods=["POST"], override_defaults=False)
@@ -372,6 +571,16 @@ def create_app() -> Flask:
             if values["interval"] and status_message is None:
                 try:
                     interval_seconds = parse_interval(values["interval"])
+                except ValueError as exc:
+                    status_message = str(exc)
+
+            scheduled_output_path = None
+            if interval_seconds is not None and status_message is None:
+                try:
+                    scheduled_output_path = _resolve_scheduled_output(
+                        values["scheduled_output"],
+                        Path(app.config["SCHEDULED_OUTPUT_ROOT"]),
+                    )
                 except ValueError as exc:
                     status_message = str(exc)
 
@@ -428,7 +637,13 @@ def create_app() -> Flask:
                 post_config["media_analysis"] = media_analysis
 
             if values["topic"] and interval_seconds is not None and not status_message:
-                scheduler = PeriodicPostScheduler(generator, output_dir=values["scheduled_output"])
+                if scheduled_output_path is None:
+                    raise RuntimeError("Scheduled output path was not resolved.")
+                scheduler = PeriodicPostScheduler(
+                    generator,
+                    output_dir=str(scheduled_output_path),
+                    database_path=app.config["SCHEDULER_DB_PATH"] or None,
+                )
                 job_id = scheduler.create_job(
                     post_config,
                     interval_seconds=interval_seconds,
@@ -442,7 +657,7 @@ def create_app() -> Flask:
                 thread.start()
                 status_message = (
                     f"Scheduled job {job_id} started every {values['interval']}. "
-                    f"Saved output to {values['scheduled_output']}/"
+                    f"Saved output to {scheduled_output_path}/"
                 )
                 status_type = "success"
                 log_event(
@@ -469,6 +684,7 @@ def create_app() -> Flask:
             status_message=status_message,
             status_type=status_type,
             values=values,
+            auth_enabled=app.config["AUTHENTICATION_CONFIGURED"],
             platforms=PLATFORMS,
             media_types=MEDIA_TYPES,
             tones=TONES,
@@ -482,4 +698,11 @@ def create_app() -> Flask:
 def main() -> None:
     configure_logging()
     app = create_app()
-    app.run(debug=False, host="127.0.0.1", port=5000)
+    host = os.environ.get("WEB_HOST", "127.0.0.1")
+    if host not in {"127.0.0.1", "localhost", "::1"} and not app.config[
+        "AUTHENTICATION_CONFIGURED"
+    ]:
+        raise RuntimeError(
+            "Configure WEB_AUTH_USERNAME and WEB_AUTH_PASSWORD before binding beyond localhost."
+        )
+    app.run(debug=False, host=host, port=5000)

@@ -3,8 +3,10 @@ from datetime import datetime, timezone
 import importlib
 import json
 import logging
+import os
 import sqlite3
 import threading
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
@@ -238,10 +240,46 @@ class RequestMetrics:
 
 
 def configure_logging() -> None:
+    try:
+        max_bytes = int(os.environ.get("APP_LOG_MAX_BYTES", str(10 * 1024 * 1024)))
+        backup_count = int(os.environ.get("APP_LOG_BACKUP_COUNT", "3"))
+    except ValueError as error:
+        raise ValueError(
+            "APP_LOG_MAX_BYTES and APP_LOG_BACKUP_COUNT must be integers."
+        ) from error
+    if max_bytes <= 0:
+        raise ValueError("APP_LOG_MAX_BYTES must be a positive integer.")
+    if backup_count < 0:
+        raise ValueError("APP_LOG_BACKUP_COUNT must be a non-negative integer.")
+
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
     )
+    root_logger = logging.getLogger()
+    root_logger.setLevel(logging.INFO)
+    log_file = os.environ.get("APP_LOG_FILE", "").strip()
+    if not log_file:
+        return
+
+    log_path = Path(log_file).expanduser().resolve()
+    if any(
+        isinstance(handler, RotatingFileHandler)
+        and Path(handler.baseFilename) == log_path
+        for handler in root_logger.handlers
+    ):
+        return
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    file_handler = RotatingFileHandler(
+        log_path,
+        maxBytes=max_bytes,
+        backupCount=backup_count,
+        encoding="utf-8",
+    )
+    file_handler.setFormatter(
+        logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s")
+    )
+    root_logger.addHandler(file_handler)
 
 
 def log_event(logger: logging.Logger, event: str, **fields: Any) -> None:

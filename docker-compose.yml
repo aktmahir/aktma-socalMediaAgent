@@ -1,0 +1,150 @@
+services:
+  app:
+    image: aktma-socialmediaagent:local
+    build: .
+    ports:
+      - "127.0.0.1:8000:8000"
+    environment:
+      AI_PROVIDER: ${AI_PROVIDER:-openai}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_VISION_MODEL: ${OPENAI_VISION_MODEL:-}
+      HUGGINGFACE_API_KEY: ${HUGGINGFACE_API_KEY:-}
+      HUGGINGFACE_MODEL: ${HUGGINGFACE_MODEL:-gpt2}
+      COHERE_API_KEY: ${COHERE_API_KEY:-}
+      COHERE_MODEL: ${COHERE_MODEL:-command-a-03-2025}
+      FLASK_SECRET_KEY_FILE: /run/secrets/flask_secret_key
+      WEB_AUTH_USERNAME: ${WEB_AUTH_USERNAME:?Set WEB_AUTH_USERNAME in .env}
+      WEB_AUTH_PASSWORD_FILE: /run/secrets/web_auth_password
+      PROMETHEUS_USERNAME: prometheus
+      PROMETHEUS_PASSWORD_FILE: /run/secrets/prometheus_password
+      SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-false}
+      RATELIMIT_STORAGE_URI: redis://redis:6379/0
+      OBSERVABILITY_DB_PATH: /app/scheduled_posts/observability.sqlite3
+      SCHEDULED_OUTPUT_ROOT: /app/scheduled_posts
+      SCHEDULER_DB_PATH: /app/scheduled_posts/scheduler.sqlite3
+      SENTRY_DSN: ${SENTRY_DSN:-}
+      SENTRY_ENVIRONMENT: ${SENTRY_ENVIRONMENT:-docker}
+    volumes:
+      - scheduled_posts:/app/scheduled_posts
+      - uploads:/app/uploads
+    secrets:
+      - flask_secret_key
+      - web_auth_password
+      - prometheus_password
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "from urllib.request import urlopen; urlopen('http://127.0.0.1:8000/health', timeout=3)"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  scheduler:
+    image: aktma-socialmediaagent:local
+    pull_policy: never
+    command:
+      - python
+      - app.py
+      - --supervise-scheduled
+      - --ai-provider
+      - ${AI_PROVIDER:-openai}
+      - --scheduler-poll-seconds
+      - "5"
+      - --max-scheduled-workers
+      - "4"
+      - --scheduled-output
+      - /app/scheduled_posts
+      - --scheduler-db
+      - /app/scheduled_posts/scheduler.sqlite3
+    environment:
+      AI_PROVIDER: ${AI_PROVIDER:-openai}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_VISION_MODEL: ${OPENAI_VISION_MODEL:-}
+      HUGGINGFACE_API_KEY: ${HUGGINGFACE_API_KEY:-}
+      HUGGINGFACE_MODEL: ${HUGGINGFACE_MODEL:-gpt2}
+      COHERE_API_KEY: ${COHERE_API_KEY:-}
+      COHERE_MODEL: ${COHERE_MODEL:-command-a-03-2025}
+      SCHEDULED_OUTPUT_ROOT: /app/scheduled_posts
+    volumes:
+      - scheduled_posts:/app/scheduled_posts
+    depends_on:
+      app:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      disable: true
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  prometheus:
+    image: prom/prometheus:v3.5.0
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=15d
+      - --web.enable-lifecycle
+    ports:
+      - "127.0.0.1:9090:9090"
+    secrets:
+      - prometheus_password
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - prometheus_data:/prometheus
+    depends_on:
+      app:
+        condition: service_healthy
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "--quiet", "http://127.0.0.1:9090/-/healthy"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  scheduled_posts:
+  uploads:
+  prometheus_data:
+
+secrets:
+  flask_secret_key:
+    file: ./secrets/flask_secret_key.txt
+  web_auth_password:
+    file: ./secrets/web_auth_password.txt
+  prometheus_password:
+    file: ./secrets/prometheus_password.txt

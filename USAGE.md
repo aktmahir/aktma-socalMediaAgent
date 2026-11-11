@@ -114,7 +114,7 @@ For automatic recovery while the CLI supervisor is running, scan all running job
 python app.py --supervise-scheduled --scheduler-poll-seconds 5 --max-scheduled-workers 4
 ```
 
-The supervisor runs until Ctrl+C and starts up to the configured worker limit. On Windows, register it to start at the current user's logon with the supplied Task Scheduler script:
+The supervisor runs until Ctrl+C and starts up to the configured worker limit. Docker Compose starts a supervisor service automatically, sharing its scheduler database and output volume with the web app; it recovers abandoned jobs after their worker leases expire. On Windows, register the local supervisor to start at the current user's logon with the supplied Task Scheduler script:
 
 ```powershell
 .\scripts\register-scheduler-supervisor.ps1 -PythonPath .venv\Scripts\python.exe -WhatIf
@@ -137,15 +137,47 @@ python web.py
 
 Open `http://127.0.0.1:5000`. The app listens on localhost and starts with Flask debug mode disabled.
 
+For single-user access control, configure both `WEB_AUTH_USERNAME` and `WEB_AUTH_PASSWORD` in the process environment or `.env`; use a unique password of at least 16 characters. Authentication is disabled when neither is set, and startup fails if only one is configured. For Docker, set `WEB_HOST=0.0.0.0` and provide both credentials to the container; the app refuses a non-localhost bind without authentication. Protect the published port with your network configuration. Login and logout use CSRF-protected forms, and `/metrics` requires an authenticated session when login is enabled; `/health` and `/ready` stay public for orchestration.
+
+### Docker Compose
+
+The Compose setup uses Gunicorn, a separate scheduled-job recovery supervisor, a shared Redis rate-limit backend, authenticated Prometheus scraping, and named volumes for scheduler state, scheduled outputs, uploads, and metrics history. It binds the app and Prometheus UI to `127.0.0.1:8000` and `127.0.0.1:9090`.
+
+1. Copy `.env.example` to `.env`.
+2. Set `WEB_AUTH_USERNAME` in `.env`.
+3. Create the git-ignored `secrets` directory and place a generated session key (at least 32 characters), a unique browser password (at least 16 characters), and a separate Prometheus password (at least 16 characters) in `flask_secret_key.txt`, `web_auth_password.txt`, and `prometheus_password.txt`, respectively. Keep the files private; Compose mounts each read-only into the services that need it.
+4. Run `docker compose up --build`, then open `http://127.0.0.1:8000`.
+5. View alert state at `http://127.0.0.1:9090/alerts`.
+
+The local sample uses HTTP and non-secure cookies, so `/ready` intentionally reports not-ready. Do not expose it beyond loopback. Compose file-backed secrets are read-only mounts, not encrypted storage; protect their host files with OS permissions and use your deployment platform's secret manager for production. For deployment behind HTTPS, configure the trusted TLS-terminating reverse proxy and set `SESSION_COOKIE_SECURE=true`. The WSGI entry point refuses to start without browser authentication, Prometheus scrape authentication, a stable session secret, and shared rate-limit storage. One Gunicorn worker is configured because scheduled jobs start in-process from web requests; a separate Compose supervisor coordinates through SQLite leases and recovers interrupted jobs after the 120-second lease expires.
+
+To use the bundled Nginx TLS proxy locally, first create a self-signed certificate (for local testing only):
+
+```powershell
+New-Item -ItemType Directory -Force secrets
+docker run --rm --mount "type=bind,source=$((Get-Location).Path)\secrets,target=/certs" nginx:1.28-alpine sh -c "apk add --no-cache openssl && openssl req -x509 -nodes -days 365 -newkey rsa:3072 -keyout /certs/tls.key -out /certs/tls.crt -subj /CN=localhost -addext subjectAltName=DNS:localhost,IP:127.0.0.1"
+docker compose -f docker-compose.yml -f docker-compose.tls.yml up --build
+```
+
+The TLS overlay requires Compose v2.24 or newer. Open `https://localhost:8443`; the browser will warn because the local certificate is self-signed. Requests to port 8080 redirect to HTTPS. The overlay disables the app's published HTTP port, sets secure cookies, and enables exactly one trusted proxy hop from Nginx's fixed private IP. The app ignores forwarded headers from all other peers, and Nginx overwrites those headers from the connection rather than trusting client-provided values. TLS binds to loopback by default; changing `TLS_BIND_ADDRESS` changes network exposure and should be done only intentionally. The overlay reserves `172.30.252.0/24`; if that conflicts with an existing Docker network, change the overlay's proxy subnet and matching trusted proxy IP together. For domain deployments, supply a certificate/key with matching subject names, set `TLS_HTTPS_PORT` to the externally published HTTPS port, and configure external network access, TLS renewal, and secret storage separately.
+
+Prometheus scrape requests use their own HTTP Basic credentials and do not rely on a browser login session. Rules alert on an unavailable scrape target, a sustained 5xx rate above 5%, or p95 latency above 2 seconds. Alerts are visible in Prometheus; notification routing is left for the deployment operator to configure.
+
+Outside Compose, use `FLASK_SECRET_KEY_FILE`, `WEB_AUTH_PASSWORD_FILE`, and `PROMETHEUS_PASSWORD_FILE` to read these values from mounted secret files. The plain environment-variable forms remain available for local development; configuring both forms for a setting is rejected.
+
 The form validates the topic, supported select values, uploaded file extensions and signatures, schedule interval, and post count. Uploads are limited to 5 MB each. Scheduling creates a SQLite job and starts a background thread in the current process; closing the process stops that worker but preserves its job record for CLI recovery. A status message includes the job ID for validation or scheduler feedback.
+
+Web schedules are confined to `SCHEDULED_OUTPUT_ROOT`, which defaults to `scheduled_posts`. Set this environment variable to a trusted local directory when a different root is needed. The form accepts relative subfolders or absolute paths that resolve inside the root; leave the field blank to use the root itself. When managing a web-created job from the CLI, use its resolved output folder with `--scheduled-output` and, if needed, its SQLite database path with `--scheduler-db`.
 
 For request monitoring, scrape `http://127.0.0.1:5000/metrics`. It returns Prometheus text-format request totals and duration histograms by bounded HTTP method and status code; the scrape endpoint itself is excluded. Aggregates persist in SQLite across restarts. The default database is `scheduled_posts/observability.sqlite3`; set `OBSERVABILITY_DB_PATH` to change it.
 
-The `http://127.0.0.1:5000/health` endpoint returns `{"status":"ok"}` when the Flask application is serving requests. It is a liveness check only. `http://127.0.0.1:5000/ready` checks observability/upload storage, production session settings, debug mode, and shared rate-limit storage, returning HTTP 503 with failed check names when the app is not ready. It does not verify provider credentials or scheduler-worker availability.
+The `http://127.0.0.1:5000/health` endpoint returns `{"status":"ok"}` when the Flask application is serving requests. It is a liveness check only. `http://127.0.0.1:5000/ready` checks observability/upload/scheduled-output storage, authentication, production session settings, debug mode, and shared rate-limit storage, returning HTTP 503 with failed check names when the app is not ready. It does not verify provider credentials or scheduler-worker availability.
 
-To pass readiness checks in a deployment, configure a stable `FLASK_SECRET_KEY` with at least 32 bytes, `SESSION_COOKIE_SECURE=true` when serving over HTTPS, and a healthy shared `RATELIMIT_STORAGE_URI` backend (the default `memory://` is intentionally not production-ready). Install and configure the selected Flask-Limiter storage backend for the deployment. These checks do not provide authentication or replace production WSGI/server configuration.
+Logs are written to stderr by default. To retain local application logs, set `APP_LOG_FILE` to a file path; `APP_LOG_MAX_BYTES` (default 10 MiB) controls rotation size and `APP_LOG_BACKUP_COUNT` (default 3) controls the number of rotated files. Invalid limits fail startup rather than silently disabling rotation. Docker Compose uses the `json-file` driver with a 10 MiB size and three-file retention limit for stdout/stderr.
 
-Unexpected web exceptions return a generic message with an `X-Request-ID` reference. Full traceback details go to application logs; a bounded SQLite table stores only the timestamp, request ID, method, route path, and exception type. When configured, Sentry receives scrubbed unhandled web exceptions with the request ID as a correlation tag; capture failures are logged while local reporting continues.
+To pass readiness checks in a deployment, configure browser and Prometheus scrape authentication, a stable `FLASK_SECRET_KEY` with at least 32 bytes, `SESSION_COOKIE_SECURE=true` when serving over HTTPS, and a healthy shared `RATELIMIT_STORAGE_URI` backend (the default `memory://` is intentionally not production-ready). When using a reverse proxy, set `TRUSTED_PROXY_HOPS` to the exact number of trusted proxies and `TRUSTED_PROXY_IP` to the immediate proxy peer's exact IP; the app drops forwarded headers from other peers. Both settings default to disabled, so forwarded headers are ignored by default. The TLS Compose overlay configures these values for its fixed Nginx address and removes the app's host-published HTTP port. Install and configure the selected Flask-Limiter storage backend for the deployment. These checks do not replace production WSGI/server configuration.
+
+Unexpected web exceptions return a generic message with an `X-Request-ID` reference. Full traceback details go to application logs; a bounded SQLite table stores only the timestamp, request ID, method, matched route template (or `<unmatched>`), and exception type. Raw URL values are not included in structured request or persisted error records. When configured, Sentry receives scrubbed unhandled web exceptions with the request ID as a correlation tag; capture failures are logged while local reporting continues.
 
 ## 5. Uploads and media limitations
 

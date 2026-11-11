@@ -1,0 +1,54 @@
+services:
+  app:
+    ports: !reset []
+    environment:
+      SESSION_COOKIE_SECURE: "true"
+      TRUSTED_PROXY_HOPS: "1"
+      TRUSTED_PROXY_IP: 172.30.252.2
+    networks:
+      proxy_backend:
+        ipv4_address: 172.30.252.3
+      app_backend:
+
+  tls_proxy:
+    image: nginx:1.28-alpine
+    environment:
+      TLS_HTTPS_PORT: ${TLS_HTTPS_PORT:-8443}
+    ports:
+      - "${TLS_BIND_ADDRESS:-127.0.0.1}:${TLS_HTTPS_PORT:-8443}:443"
+      - "${TLS_BIND_ADDRESS:-127.0.0.1}:${TLS_HTTP_PORT:-8080}:80"
+    volumes:
+      - ./deploy/nginx.conf:/etc/nginx/templates/default.conf.template:ro
+      - ./secrets/tls.crt:/etc/nginx/tls/tls.crt:ro
+      - ./secrets/tls.key:/etc/nginx/tls/tls.key:ro
+    depends_on:
+      app:
+        condition: service_healthy
+    networks:
+      proxy_backend:
+        ipv4_address: 172.30.252.2
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  redis:
+    networks:
+      - app_backend
+
+  scheduler:
+    networks:
+      - app_backend
+
+  prometheus:
+    networks:
+      - app_backend
+
+networks:
+  proxy_backend:
+    ipam:
+      config:
+        - subnet: 172.30.252.0/24
+  app_backend:

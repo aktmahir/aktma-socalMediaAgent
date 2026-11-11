@@ -13,6 +13,7 @@ This checklist reflects the current prototype status. Checked items are implemen
 - [x] Web form validates basic topic, option, extension, count, and interval input.
 - [x] Scheduler rejects non-positive intervals and negative counts on direct calls.
 - [x] Regression tests pass using Python's built-in `unittest` runner.
+- [ ] Python 3.9 runtime, dependency, and package-install compatibility passes the expanded CI matrix.
 - [x] Flask test-client coverage exercises valid generation, invalid scheduling input, and valid scheduled-job creation.
 - [x] GitHub Actions workflow runs the test suite on pushes and pull requests.
 - [ ] Credentialed live smoke tests for each external provider.
@@ -24,6 +25,7 @@ This checklist reflects the current prototype status. Checked items are implemen
 - [x] SQLite worker leases prevent concurrent workers for the same job and expire for manual recovery after process failure.
 - [x] Operators can explicitly retry a job after bounded generation retries are exhausted.
 - [x] Opt-in CLI supervisor scans persisted running jobs and recovers expired workers with a configurable concurrency limit.
+- [x] Docker Compose runs a separate scheduler supervisor sharing the app database/output volume and coordinating through job leases.
 - [x] Optional Windows Task Scheduler registration script starts the supervisor at the current user's logon.
 - [ ] Register the Windows logon task on each local account/host that needs unattended scheduler recovery.
 - [x] Web validation errors and schedule-start messages have distinct accessible status styling and live-region announcements.
@@ -39,17 +41,20 @@ This checklist reflects the current prototype status. Checked items are implemen
 
 ## Security and operations
 
-- [ ] Authentication and authorization for any shared deployment.
+- [x] Optional single-user authentication for local/Docker deployments.
+- [ ] Multi-user authentication and role-based authorization for shared deployments.
 - [x] Session-backed CSRF protection and per-IP rate limiting for web routes (120 requests/hour globally; 10 POSTs/minute for generation/scheduling).
-- [ ] Production WSGI/server and deployment configuration.
+- [x] Gunicorn WSGI and loopback-only Docker Compose deployment configuration with optional Nginx TLS.
+- [ ] Public-production deployment pipeline, external secret management/rotation, and certificate lifecycle.
 - [x] Local `.env` signing-key generation, storage, and session invalidation on rotation are documented.
 - [ ] Production secret-management and rotation beyond local `.env`.
 - [x] Application liveness endpoint, structured application/scheduler logs, and persistent request metrics.
 - [x] Production readiness endpoint, SQLite-persistent request metrics, and centralized local exception reporting with bounded error-event retention.
 - [x] Local web launcher binds to `127.0.0.1` with Flask debug mode disabled; regression-tested.
+- [x] Web-supplied scheduled-output paths are confined to configurable `SCHEDULED_OUTPUT_ROOT`.
 - [x] CI workflow configured to run the regression suite.
 
-Jobs left running after process termination can be recovered manually with `--run-scheduled JOB_ID` or by running `--supervise-scheduled` after the 120-second lease expires. On Windows, `scripts/register-scheduler-supervisor.ps1` provides opt-in current-user logon startup; the task is not registered automatically. The lease is local to one SQLite database and is not a distributed or production-grade job service.
+Jobs left running after process termination are recovered by the Docker Compose supervisor after the 120-second lease expires. Local installs can run `--run-scheduled JOB_ID` or `--supervise-scheduled`; on Windows, `scripts/register-scheduler-supervisor.ps1` provides opt-in current-user logon startup. The task is not registered automatically. The lease is local to one SQLite database and is not a distributed or production-grade job service.
 
 ## Completion gate
 

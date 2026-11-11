@@ -1,0 +1,42 @@
+groups:
+  - name: social-media-agent
+    rules:
+      - alert: SocialMediaAgentUnavailable
+        expr: up{job="social-media-agent"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: Social Media Agent metrics target is unavailable
+          description: Prometheus has failed to scrape the application for at least 2 minutes.
+
+      - alert: SocialMediaAgentHighServerErrorRate
+        expr: |
+          (
+            sum(rate(social_media_agent_http_requests_total{job="social-media-agent",status_code=~"5.."}[5m]))
+            /
+            sum(rate(social_media_agent_http_requests_total{job="social-media-agent"}[5m]))
+          ) > 0.05
+          and
+          sum(rate(social_media_agent_http_requests_total{job="social-media-agent"}[5m])) > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Social Media Agent server error rate is above 5%
+          description: More than 5% of observed HTTP requests returned a 5xx response over the last 5 minutes.
+
+      - alert: SocialMediaAgentHighP95Latency
+        expr: |
+          histogram_quantile(
+            0.95,
+            sum by (le) (
+              rate(social_media_agent_http_request_duration_seconds_bucket{job="social-media-agent"}[5m])
+            )
+          ) > 2
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: Social Media Agent p95 request latency is above 2 seconds
+          description: The p95 HTTP request latency has exceeded 2 seconds for at least 10 minutes.

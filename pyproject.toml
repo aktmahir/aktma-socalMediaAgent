@@ -26,6 +26,11 @@ dependencies = [
 monitoring = [
   "sentry-sdk>=2.0.0,<3.0.0",
 ]
+production = [
+  "gunicorn>=22.0,<24.0",
+  "redis>=5.0,<7.0",
+  "sentry-sdk>=2.0.0,<3.0.0",
+]
 
 [project.urls]
 Homepage = "https://github.com/aktma-socalMediaAgent"
@@ -35,7 +40,7 @@ aktma-socalmediaagent = "app:main"
 aktma-socalmediaagent-web = "social_media_agent.web:main"
 
 [tool.setuptools]
-py-modules = ["app"]
+py-modules = ["app", "wsgi"]
 
 [tool.setuptools.packages.find]
 where = ["."]

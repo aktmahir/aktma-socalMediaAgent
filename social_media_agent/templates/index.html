@@ -27,6 +27,12 @@
       <div class="card">
         <h1>Social Media Post Generator</h1>
         <p>Create captions, hashtags, and CTAs instantly with AI or a smart fallback.</p>
+        {% if auth_enabled %}
+        <form method="post" action="{{ url_for('logout') }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <button type="submit">Sign out</button>
+        </form>
+        {% endif %}
 
         <form method="post" enctype="multipart/form-data">
           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -90,7 +96,8 @@
 
           <div class="field">
             <label for="scheduled_output">Scheduled output folder</label>
-            <input id="scheduled_output" name="scheduled_output" type="text" value="{{ values.scheduled_output }}" placeholder="scheduled_posts">
+            <input id="scheduled_output" name="scheduled_output" type="text" value="{{ values.scheduled_output }}" placeholder="Configured output root">
+            <small>Leave blank to use the configured root. Custom folders must remain inside that root.</small>
           </div>
 
           <div class="field">

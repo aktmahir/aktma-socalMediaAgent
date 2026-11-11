@@ -2,53 +2,44 @@
 
 ## Current status
 
-The project provides a small local workflow for generating social media content. It supports CLI and server-rendered Flask interfaces, external AI adapters, local fallback generation, bounded local image/video analysis, and periodic JSON output. Phase 1 stabilizes provider request handling and rejects common invalid input. External provider integrations are covered by mocks, not live API calls.
+As of 2026-11-11, the project provides local and Docker workflows for generating social media drafts through a CLI or server-rendered Flask interface. It supports OpenAI, Hugging Face, and Cohere adapters, a randomized local-template fallback, bounded local image/video analysis, optional OpenAI vision, and SQLite-backed scheduled JSON output with optional Docker supervisor recovery. Provider integrations are mock-tested; this audit did not make credentialed provider requests.
 
 ## Feature assessment
 
 | Feature | Status | Evidence / limitation |
 | --- | --- | --- |
-| CLI generation | Implemented | `app.py` validates topic and schedule arguments, then calls the generator. |
-| Platform-specific generation | Implemented | Platform descriptions and allowed CLI/web values are defined in the application. |
-| OpenAI generation | Implemented; mock-tested | Uses the current SDK client API; live API access has not been tested. |
-| Hugging Face generation | Implemented; mock-tested | Sends Bearer auth and handles HTTP/API error responses with logged local fallback. Actual model availability is external. |
-| Cohere generation | Implemented; mock-tested | Uses the v2 Chat endpoint and parses text content; live API access has not been tested. |
-| Local fallback | Implemented | Returns caption, hashtags, CTA, and YouTube metadata without an external provider. Output uses randomized templates. |
-| Web generation and scheduling | Implemented; route-tested | Flask test-client coverage exercises valid generation, invalid schedule feedback, and creation of a persisted scheduled job. |
-| Input validation | Implemented for core fields | CLI, web, and scheduler validate topic, selection values, file extensions/signatures, counts, and intervals. This is not comprehensive abuse protection. |
-| Upload support | Partial | Uploads are restricted to 5 MB, checked against allowlisted signatures and media type, stored with random names, and parsed locally within image/video resource limits. ClamAV scanning is optional; OpenAI vision requires explicit per-upload opt-in. |
-| Scheduling | Implemented for local use | SQLite persists job configuration, status, progress, next-run time, failures, and output payloads. CLI supports lifecycle operations and opt-in supervision; a Windows script can register current-user logon startup. Per-job expiring leases prevent concurrent workers within the same database; unexpected generator exceptions receive up to three attempts. |
-| YouTube metadata | Implemented | Title, description, and tags are included in output; provider response parsing falls back when malformed. |
-| Automated tests | Implemented; CI configured | `python -m unittest discover -s tests -v`; Flask and scheduler coverage is included. GitHub Actions runs tests across Python 3.10–3.12. Provider integrations remain mocked. |
-| Production deployment | Missing | `/ready` verifies selected local dependencies and production settings, but no production server/deployment configuration or authentication is provided. Web routes use CSRF protection and per-IP rate limits; multi-worker deployments require shared limiter storage. |
+| CLI generation | Implemented | `app.py` validates required topics and schedule arguments, generates drafts, and exposes scheduler lifecycle commands. |
+| Platform-specific generation | Implemented | Platform choices and prompt descriptions cover Instagram, LinkedIn, Twitter, Facebook, YouTube, and YouTube Shorts. |
+| OpenAI generation | Implemented; mock-tested | Uses the SDK client API. Credential, model-access, and live response behavior have not been verified. |
+| Hugging Face generation | Implemented; mock-tested | Handles HTTP/API errors with a logged local fallback. The selected model must be available through the provider's current inference service. |
+| Cohere generation | Implemented; mock-tested | Uses the v2 Chat endpoint and parses text content. Live API access has not been tested. |
+| Local fallback | Implemented | Randomized templates produce drafts without a provider. Fallback output is identified so it is not mistaken for provider output. |
+| Web generation and scheduling | Implemented; route-tested | Flask test-client tests cover generation, invalid inputs, upload handling, persisted schedule creation, and output-path confinement. Scheduled jobs run in daemon threads within the web process. |
+| Input validation | Implemented for core fields | CLI, web, and scheduler validate topics, supported choices, intervals, counts, and uploads. This is not comprehensive abuse protection. |
+| Media uploads and analysis | Partial | Files are limited to 5 MB, checked against allowlisted extensions/signatures and selected media type, stored under random names, and parsed with resource limits. Optional ClamAV scanning may report unscanned; external OpenAI vision requires an explicit per-upload opt-in. |
+| Scheduling and recovery | Implemented for local and Docker use | SQLite persists job state, retry attempts, and generated payloads. CLI lifecycle controls, a Docker Compose supervisor, and an opt-in local supervisor are available; a Windows script can register current-user logon startup. Leases coordinate workers only when they use the same SQLite database. |
+| Operational visibility | Implemented for local use | `/health`, `/ready`, and SQLite-persisted `/metrics` are available. Unhandled web exceptions are logged locally and stored as bounded, data-minimized records; optional Sentry reporting requires an SDK extra and configured DSN. |
+| Automated tests and CI | Implemented; latest full local run passes; expanded matrix pending | All 117 tests passed locally. GitHub Actions is configured for Python 3.9–3.12 and smoke-tests the monitoring, scheduler-supervisor, and TLS Compose services; the updated workflow has not run. Provider and Sentry behavior remains mocked; tests make no live provider calls. |
+| Production deployment | Partial | A Gunicorn WSGI factory and loopback-only Docker Compose stack provide single-user auth, Redis rate-limit storage, Prometheus monitoring, secret-file mounts, and optional Nginx TLS termination. Public production deployment, external secret management/rotation, multi-user access, and alert notification routing remain unimplemented. |
 
-## Phase 1 changes and verification
+## Verified workflows
 
-### Provider adapters
+- CLI validation reports invalid topics and schedule arguments through argparse. The web form validates supported selections and schedule inputs and returns user-visible feedback.
+- The scheduler rejects invalid direct-call arguments, persists jobs and output payloads, limits concurrent workers per job/database with expiring leases, retries unexpected generation exceptions up to three attempts, and supports explicit retry of terminal failures.
+- A provider/API failure that returns local-template output is treated as a successful generation. `generation_source` distinguishes local fallback from provider output.
+- Uploaded images and videos are parsed locally within configured pixel/frame/time limits. FFprobe and FFmpeg are required for video analysis. An unchecked-by-default option sends prepared image data to OpenAI vision.
+- Session-backed CSRF protection and per-IP rate limits are enabled. Default limiter state is process-local; health, readiness, and metrics probes are exempt.
 
-- OpenAI uses `OpenAI(...).chat.completions.create(...)`; no legacy `ChatCompletion.create` path remains.
-- Hugging Face and Cohere use the configured API key as a Bearer token.
-- Cohere uses `https://api.cohere.com/v2/chat`, sends a user message and JSON response format, and parses the v2 message content blocks.
-- Provider transport and error-payload failures are logged and fall back to local generation.
-- Mock tests cover successful response parsing and fallback behavior. Credentials and live provider service behavior remain unverified.
+## Known limitations and local trust boundaries
 
-### Input and scheduling
-
-- Shared schedule interval and count parsers reject malformed, empty, zero/negative interval, and negative/empty count values as applicable.
-- CLI errors are reported through argparse; the web form returns status feedback; scheduler direct calls reject invalid interval seconds and counts.
-- Empty topics and unsupported web select choices are rejected rather than sent to generation.
-- Tests cover CLI parsing, scheduler validation/persistence/recovery, and valid/invalid Flask test-client submissions.
-
-## Known limitations
-
-- The local generator is a template-based fallback, not an AI model.
-- Media is parsed locally for bounded metadata and visual observations; this is not exhaustive validation or semantic understanding. Optional OpenAI vision sends media externally only after per-upload opt-in.
-- Signature checks alone are insufficient; image/video parsers enforce additional format, decode, and resource limits. ClamAV scanning is optional and may leave an upload marked unscanned.
-- Web schedules use daemon-thread workers that stop when the process exits; the SQLite job remains and can be recovered with `--run-scheduled JOB_ID` or the opt-in `--supervise-scheduled` CLI command. Windows task registration is explicit and current-user scoped.
-- Leases prevent concurrent workers for one job in a shared SQLite database; separate databases are not coordinated. Unexpected generator exceptions are retried; provider/model failures use local fallback without automatic provider retries and count as successful generation. `generation_source` is included in scheduled JSON and supervisor output.
-- Provider failure fallback is surfaced as local output and does not imply the external provider succeeded.
-- There is no authentication. CSRF tokens protect form submissions and per-IP rate limits constrain request volume, but the web app is intended for local use; default limiter state is process-local.
+- The local generator is a template-based fallback, not an AI model. Credentialed provider behavior and provider-side model availability remain unverified.
+- Local media observations are not exhaustive validation or reliable semantic interpretation. ClamAV may be unavailable; an unscanned result is not a safety guarantee.
+- Web schedule output paths are confined to `SCHEDULED_OUTPUT_ROOT` (default: `scheduled_posts`), including after resolving `..` segments and existing symlinks. The root is operator-configurable and is not an authorization boundary against a hostile local process; do not expose the app without access controls.
+- Web-created workers stop with the web process. Docker Compose runs a separate supervisor that recovers abandoned running jobs after lease expiry; local supervisor/task setup remains an explicit operator action.
+- Optional single-user authentication protects local/Docker application routes when configured; Compose requires credentials. Multi-user authorization and external identity providers are absent. CSRF protection and rate limiting alone do not provide identity or access control.
+- Sentry reporting is opt-in. The event scrubber removes request/user payloads and arbitrary messages, but sanitized stack frames retain function names, line numbers, and source basenames. Local traceback logs contain exception details and require appropriate local access and retention controls.
+- `/ready` checks metrics, upload, and scheduled-output storage plus selected configuration conditions. It creates the configured scheduled-output root if needed. It does not verify provider credentials, scheduler-worker availability, or external monitoring delivery.
 
 ## Functional conclusion
 
-The core local use case is available with automated web and scheduler lifecycle coverage. The project remains a prototype: provider integrations need credentialed smoke tests, Windows unattended recovery requires explicit task registration, and production safeguards remain incomplete.
+The local draft-generation, upload-analysis, and scheduling workflows are available and covered by automated tests. Web-supplied schedule outputs are confined to the configured root; CLI output paths remain operator-controlled. The Docker sample adds single-user authentication, TLS termination, monitoring, and scheduler supervision, but the project is not a complete public-production deployment. Live provider tests, external secret/certificate lifecycle, alert routing, and multi-user access remain outstanding.
