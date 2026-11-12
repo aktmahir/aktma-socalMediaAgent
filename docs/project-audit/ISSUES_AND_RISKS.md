@@ -36,7 +36,7 @@ Provider failures and JSON-formatted request/job events are logged at INFO by CL
 ## Mitigation priorities
 
 1. Resolve the OpenAI authentication error, Hugging Face connection error, and Cohere HTTP error observed in the 2026-11-11 smoke attempts, then rerun the minimal credentialed checks and document successful model configuration.
-2. Keep route/scheduler regression coverage current; GitHub Actions run 16 passed Python 3.9 on Ubuntu 22.04 (dependency/package install and all 126 tests). Follow up on that run's separate failed Docker monitoring job.
+2. Keep route/scheduler regression coverage current; GitHub Actions run 19 passed all 135 tests across Python 3.9–3.12 and its Docker monitoring/TLS checks.
 3. Register the Windows supervisor task for the intended user if unattended recovery after sign-in is required, and define provider outage behavior.
 4. Provision and validate the self-hosted VM deployment, configure an external secret manager/rotation policy beyond Compose file-backed secrets, verify Certbot renewal and proxy recreation, and address malware scanning before any shared exposure. Validate account bootstrap, invitation delivery, backups, and access revocation in the target environment.
 5. Configure approved Sentry and log sinks if required, then route Prometheus alerts to an operator-selected notification destination.

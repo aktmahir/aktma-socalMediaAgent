@@ -30,7 +30,7 @@
 - **Description:** Expand regression coverage to the scheduler and generator and run it automatically.
 - **Modules:** `tests/`, CI configuration.
 - **Current state:** `unittest` regression tests cover provider mocks and failures, scheduler output/recovery/supervision, and Flask generation and schedule submissions. GitHub Actions is configured to run the suite on pushes and pull requests across Python 3.9–3.12.
-- **Verified:** The current suite discovers 135 tests and the full Windows run passed all 135. The 126-test suite at GitHub Actions run 16 passed locally in a Python 3.9 container and on CI across Python 3.9 (Ubuntu 22.04) and Python 3.10–3.12; Python 3.9 dependency installation and `pip install .` also passed. The separate Docker monitoring job failed in run 16 and requires follow-up.
+- **Verified:** The current suite discovers 135 tests and the full Windows run passed all 135. GitHub Actions run 19 passed all 135 tests across Python 3.9 (Ubuntu 22.04) and Python 3.10–3.12. Its Docker monitoring job passed authenticated scraping, scheduler metrics, alert-rule loading, and TLS/readiness checks.
 - **Remaining:** Expand coverage as new features land.
 
 ### ROAD-05 — Persistent scheduling

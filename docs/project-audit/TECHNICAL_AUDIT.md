@@ -68,7 +68,7 @@ The documented regression command is:
 python -m unittest discover -s tests -v
 ```
 
-The current full suite discovers 135 tests and passed in the project virtual environment. The 126-test suite at GitHub Actions run 16 passed in a Python 3.9 container and on the Python 3.9–3.12 GitHub matrix; Python 3.9 dependency installation and `pip install .` also succeeded. The separate Docker monitoring job failed in that run and needs follow-up. Tests use mocks for providers and Sentry; no live provider or telemetry requests are made.
+The current full suite discovers 135 tests and passed in the project virtual environment and GitHub Actions run 19 across Python 3.9–3.12. The Docker monitoring job in run 19 passed authenticated scraping, scheduler metrics, alert-rule loading, and TLS/readiness checks. Tests use mocks for providers and Sentry; no live provider or telemetry requests are made.
 
 ## Overall technical assessment
 

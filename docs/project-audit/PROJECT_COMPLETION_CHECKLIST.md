@@ -13,7 +13,7 @@ This checklist reflects the current prototype status. Checked items are implemen
 - [x] Web form validates basic topic, option, extension, count, and interval input.
 - [x] Scheduler rejects non-positive intervals and negative counts on direct calls.
 - [x] Regression tests pass using Python's built-in `unittest` runner.
-- [x] Python 3.9 runtime, dependency, package-install, and test compatibility passes the expanded CI matrix (GitHub Actions run 16 passed all 126 tests on Ubuntu 22.04).
+- [x] Python 3.9 runtime, dependency, package-install, and test compatibility passes the expanded CI matrix (GitHub Actions run 19 passed all 135 tests across Python 3.9–3.12).
 - [x] Flask test-client coverage exercises valid generation, invalid scheduling input, and valid scheduled-job creation.
 - [x] GitHub Actions workflow runs the test suite on pushes and pull requests.
 - [ ] Credentialed live smoke tests pass for each external provider (latest one-request attempt per configured provider fell back locally: OpenAI authentication error, Hugging Face connection error, Cohere HTTP error).
