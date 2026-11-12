@@ -24,6 +24,9 @@
         </div>
         <button type="submit">Sign in</button>
       </form>
+      {% if multi_user %}
+      <p>Have an invitation token? <a href="{{ url_for('accept_invitation') }}">Create your account</a>.</p>
+      {% endif %}
     </main>
   </body>
 </html>

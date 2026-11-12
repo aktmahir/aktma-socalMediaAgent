@@ -80,6 +80,7 @@ class PeriodicPostScheduler:
                 """
                 CREATE TABLE IF NOT EXISTS scheduled_jobs (
                     id TEXT PRIMARY KEY,
+                    owner_id INTEGER,
                     post_config TEXT NOT NULL,
                     interval_seconds INTEGER NOT NULL,
                     target_count INTEGER NOT NULL,
@@ -128,6 +129,10 @@ class PeriodicPostScheduler:
                     ADD COLUMN generation_attempts INTEGER NOT NULL DEFAULT 0
                     """
                 )
+            if "owner_id" not in job_columns:
+                connection.execute(
+                    "ALTER TABLE scheduled_jobs ADD COLUMN owner_id INTEGER"
+                )
             connection.commit()
         finally:
             connection.close()
@@ -171,7 +176,13 @@ class PeriodicPostScheduler:
         finally:
             connection.close()
 
-    def _create_job(self, post_config: Dict[str, object], interval_seconds: int, count: int) -> str:
+    def _create_job(
+        self,
+        post_config: Dict[str, object],
+        interval_seconds: int,
+        count: int,
+        owner_id: Optional[int] = None,
+    ) -> str:
         job_id = uuid.uuid4().hex
         now = datetime.now().isoformat()
         connection = self._connect()
@@ -179,12 +190,13 @@ class PeriodicPostScheduler:
             connection.execute(
                 """
                 INSERT INTO scheduled_jobs (
-                    id, post_config, interval_seconds, target_count, completed_count,
+                    id, owner_id, post_config, interval_seconds, target_count, completed_count,
                     status, output_dir, next_run_at, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, 0, 'running', ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, 0, 'running', ?, ?, ?, ?)
                 """,
                 (
                     job_id,
+                    owner_id,
                     json.dumps(post_config, ensure_ascii=False),
                     interval_seconds,
                     count,
@@ -206,12 +218,18 @@ class PeriodicPostScheduler:
         finally:
             connection.close()
 
-    def list_jobs(self) -> List[Dict[str, object]]:
+    def list_jobs(self, owner_id: Optional[int] = None) -> List[Dict[str, object]]:
         connection = self._connect()
         try:
-            rows = connection.execute(
-                "SELECT * FROM scheduled_jobs ORDER BY created_at DESC"
-            ).fetchall()
+            if owner_id is None:
+                rows = connection.execute(
+                    "SELECT * FROM scheduled_jobs ORDER BY created_at DESC"
+                ).fetchall()
+            else:
+                rows = connection.execute(
+                    "SELECT * FROM scheduled_jobs WHERE owner_id = ? ORDER BY created_at DESC",
+                    (owner_id,),
+                ).fetchall()
             jobs = []
             for row in rows:
                 job = dict(row)
@@ -298,12 +316,13 @@ class PeriodicPostScheduler:
         post_config: Dict[str, object],
         interval_seconds: int,
         count: int = 0,
+        owner_id: Optional[int] = None,
     ) -> str:
         if interval_seconds <= 0:
             raise ValueError("Interval must be a positive number of seconds.")
         if count < 0:
             raise ValueError("Scheduled post count must be non-negative.")
-        return self._create_job(post_config, interval_seconds, count)
+        return self._create_job(post_config, interval_seconds, count, owner_id)
 
     def run_job(self, job_id: str) -> None:
         owner_token = uuid.uuid4().hex

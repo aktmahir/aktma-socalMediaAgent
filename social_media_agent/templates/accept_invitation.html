@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Accept invitation - Social Media Post Generator</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='login.css') }}">
+  </head>
+  <body>
+    <main class="card">
+      <h1>Accept invitation</h1>
+      <p>Invitations expire after 24 hours and can only be used once.</p>
+      {% if error_message %}
+      <p class="error" role="alert">{{ error_message }}</p>
+      {% endif %}
+      <form method="post">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div class="field">
+          <label for="invitation">Invitation token</label>
+          <input id="invitation" name="invitation" type="text" autocomplete="off" required>
+        </div>
+        <div class="field">
+          <label for="username">Username</label>
+          <input id="username" name="username" type="text" autocomplete="username" minlength="3" maxlength="32" required>
+        </div>
+        <div class="field">
+          <label for="password">Password (minimum 16 characters)</label>
+          <input id="password" name="password" type="password" autocomplete="new-password" minlength="16" required>
+        </div>
+        <div class="field">
+          <label for="confirm_password">Confirm password</label>
+          <input id="confirm_password" name="confirm_password" type="password" autocomplete="new-password" minlength="16" required>
+        </div>
+        <button type="submit">Create account</button>
+      </form>
+    </main>
+  </body>
+</html>

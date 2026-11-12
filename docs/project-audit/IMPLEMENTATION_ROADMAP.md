@@ -30,7 +30,7 @@
 - **Description:** Expand regression coverage to the scheduler and generator and run it automatically.
 - **Modules:** `tests/`, CI configuration.
 - **Current state:** `unittest` regression tests cover provider mocks and failures, scheduler output/recovery/supervision, and Flask generation and schedule submissions. GitHub Actions is configured to run the suite on pushes and pull requests across Python 3.9–3.12.
-- **Verified:** The current suite discovers 131 tests and the full Windows run passed all 131. The 126-test suite at GitHub Actions run 16 passed locally in a Python 3.9 container and on CI across Python 3.9 (Ubuntu 22.04) and Python 3.10–3.12; Python 3.9 dependency installation and `pip install .` also passed. The separate Docker monitoring job failed in run 16 and requires follow-up.
+- **Verified:** The current suite discovers 135 tests and the full Windows run passed all 135. The 126-test suite at GitHub Actions run 16 passed locally in a Python 3.9 container and on CI across Python 3.9 (Ubuntu 22.04) and Python 3.10–3.12; Python 3.9 dependency installation and `pip install .` also passed. The separate Docker monitoring job failed in run 16 and requires follow-up.
 - **Remaining:** Expand coverage as new features land.
 
 ### ROAD-05 — Persistent scheduling
@@ -41,10 +41,10 @@
 - **Limitations:** Docker Compose starts a separate supervisor against the shared database, which recovers abandoned jobs after the 120-second worker lease expires. Local recovery is available manually through `--run-scheduled JOB_ID` or continuously through the opt-in `--supervise-scheduled` CLI command. The lease prevents overlapping workers for the same database/job but is not distributed coordination. Unexpected generator exceptions are retried up to three attempts with 1- and 2-second delays; terminal errors are persisted and can be retried explicitly with `--retry-job JOB_ID`. Provider/model failures use local generation without provider retries; fallback source is recorded in generated JSON, console output, and lifecycle logs, and the fallback counts as a successful scheduled iteration. Persisted generation payloads replay to the same output file if progress recording is interrupted; provider calls may repeat if interruption occurs before the payload is committed. Web-created workers are daemon threads and stop with the web process.
 
 ### ROAD-06 — Authentication and authorization
-- **Status:** Implemented for single-user local/Docker access.
-- **Description:** Protect application routes, including metrics, with a rate-limited CSRF-protected login. Health/readiness remain public for orchestration.
-- **Acceptance:** Environment configuration validation, protected-route, login/logout, invalid-credential, and Docker bind tests pass.
-- **Limitations:** Multi-user identity/roles and external identity providers are not implemented.
+- **Status:** Implemented for single-user and invite-only multi-user local/Docker access.
+- **Description:** Protect application routes with a rate-limited CSRF-protected login. Multi-user mode uses local SQLite accounts, admin/user roles, invitation-based signup, and per-user upload/scheduled-output directories. Health/readiness remain public for orchestration.
+- **Acceptance:** Legacy single-user behavior remains covered; multi-user tests cover invitation acceptance, role checks, account disabling, and per-user schedule-output scope.
+- **Limitations:** External identity providers, self-service password reset, per-user quotas, and production deployment validation are not implemented.
 
 ### ROAD-11 — Process supervision
 - **Status:** Implemented as an opt-in local CLI supervisor and an automatic Docker Compose service.

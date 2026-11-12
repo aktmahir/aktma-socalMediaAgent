@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Manage users - Social Media Post Generator</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='login.css') }}">
+  </head>
+  <body>
+    <main class="card">
+      <h1>Manage users</h1>
+      <p><a href="{{ url_for('index') }}">Back to generator</a></p>
+      {% if status_message %}
+      <p role="{{ 'alert' if status_type == 'error' else 'status' }}">{{ status_message }}</p>
+      {% endif %}
+      {% if invitation_token %}
+      <div class="field">
+        <label for="new-invitation">One-time invitation token (shown once)</label>
+        <textarea id="new-invitation" rows="3" readonly>{{ invitation_token }}</textarea>
+        <p>Send this token to the invitee over an approved private channel. It expires in 24 hours.</p>
+      </div>
+      {% endif %}
+      <h2>Invite a user</h2>
+      <form method="post" action="{{ url_for('create_invitation') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div class="field">
+          <label for="role">Role</label>
+          <select id="role" name="role">
+            <option value="user">User</option>
+            <option value="admin">Administrator</option>
+          </select>
+        </div>
+        <button type="submit">Create invitation</button>
+      </form>
+      <h2>Accounts</h2>
+      {% for user in users %}
+      <section class="field">
+        <strong>{{ user.username }}</strong>
+        {% if user.id == current_user_id %}(you){% endif %}
+        <span>{{ user.role }} · {{ "active" if user.is_active else "disabled" }}</span>
+        {% if user.id != current_user_id %}
+        <form method="post" action="{{ url_for('set_user_role', user_id=user.id) }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <label for="role-{{ user.id }}">Role</label>
+          <select id="role-{{ user.id }}" name="role">
+            <option value="user" {% if user.role == "user" %}selected{% endif %}>User</option>
+            <option value="admin" {% if user.role == "admin" %}selected{% endif %}>Administrator</option>
+          </select>
+          <button type="submit">Update role</button>
+        </form>
+        <form method="post" action="{{ url_for('set_user_status', user_id=user.id) }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <input type="hidden" name="active" value="{{ 'false' if user.is_active else 'true' }}">
+          <button type="submit">{{ "Disable" if user.is_active else "Enable" }} account</button>
+        </form>
+        {% endif %}
+      </section>
+      {% else %}
+      <p>No accounts exist.</p>
+      {% endfor %}
+    </main>
+  </body>
+</html>

@@ -543,7 +543,7 @@ class PhaseTwoCoverageTests(unittest.TestCase):
         )
         with patch("wsgi.create_app", return_value=app), self.assertRaisesRegex(
             RuntimeError,
-            "single-user authentication, Prometheus scrape authentication, "
+            "browser authentication, Prometheus scrape authentication, "
             "a stable session secret, shared rate-limit storage",
         ):
             create_wsgi_app()

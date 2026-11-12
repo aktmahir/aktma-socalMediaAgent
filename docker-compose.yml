@@ -23,8 +23,10 @@ services:
       COHERE_API_KEY_FILE: /run/secrets/cohere_api_key
       COHERE_MODEL: ${COHERE_MODEL:-command-a-03-2025}
       FLASK_SECRET_KEY_FILE: /run/secrets/flask_secret_key
-      WEB_AUTH_USERNAME: ${WEB_AUTH_USERNAME:?Set WEB_AUTH_USERNAME in .env}
+      WEB_AUTH_USERNAME: ${WEB_AUTH_USERNAME:-}
       WEB_AUTH_PASSWORD_FILE: /run/secrets/web_auth_password
+      MULTI_USER_AUTH_ENABLED: ${MULTI_USER_AUTH_ENABLED:-false}
+      AUTH_DATABASE_PATH: /app/scheduled_posts/accounts.sqlite3
       PROMETHEUS_USERNAME: prometheus
       PROMETHEUS_PASSWORD_FILE: /run/secrets/prometheus_password
       SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-false}

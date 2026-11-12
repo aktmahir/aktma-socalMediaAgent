@@ -27,7 +27,7 @@ This checklist reflects the current prototype status. Checked items are implemen
 - [x] Opt-in CLI supervisor scans persisted running jobs and recovers expired workers with a configurable concurrency limit.
 - [x] Docker Compose runs a separate scheduler supervisor sharing the app database/output volume and coordinating through job leases.
 - [x] Optional Windows Task Scheduler registration script starts the supervisor at the current user's logon.
-- [x] Register the Windows logon task for the current Windows account/host; repeat on any other account/host that needs unattended scheduler recovery.
+- [ ] Operator registers the Windows logon task on each intended account/host when unattended scheduler recovery is required.
 - [x] Web validation errors and schedule-start messages have distinct accessible status styling and live-region announcements.
 - [x] Generated posts identify whether output came from the selected provider or the local template fallback.
 - [x] Bounded retry policy records failures and stops after three unexpected generator exceptions.
@@ -43,7 +43,7 @@ This checklist reflects the current prototype status. Checked items are implemen
 
 - [x] Optional single-user authentication for local/Docker deployments.
 - [x] Authenticated browser sessions expire after a fixed 12-hour maximum lifetime; HTTPS uses a host-only `__Host-` cookie.
-- [ ] Multi-user authentication and role-based authorization for shared deployments.
+- [x] Invite-only multi-user authentication with admin/user roles, account management, and per-user upload/scheduled-output isolation.
 - [x] Session-backed CSRF protection and per-IP rate limiting for web routes (120 requests/hour globally; 10 POSTs/minute for generation/scheduling).
 - [x] Browser security headers restrict content sources, framing, referrers, and unused device permissions; HSTS is sent only over HTTPS.
 - [x] Docker app, scheduler, Redis, and Prometheus containers use non-root users, read-only root filesystems, dropped Linux capabilities, no-new-privileges, and bounded temporary filesystems.
@@ -56,7 +56,7 @@ This checklist reflects the current prototype status. Checked items are implemen
 - [x] Let's Encrypt HTTP-01 webroot route and TLS-proxy renewal deploy hook.
 - [ ] Provisioned and publicly validated production VM, external secret manager with verified rotation, and automated certificate renewal lifecycle.
 - [x] Local `.env` signing-key generation, storage, and session invalidation on rotation are documented.
-- [ ] Production secret-management and rotation beyond local `.env`.
+- [ ] Production secret-management and rotation beyond local `.env` (host-file rotation helper documented; external secret manager and verified rotation remain outstanding).
 - [x] Application liveness endpoint, structured application/scheduler logs, and persistent request metrics.
 - [x] Production readiness endpoint, SQLite-persistent request metrics, and centralized local exception reporting with bounded error-event retention.
 - [x] Local web launcher binds to `127.0.0.1` with Flask debug mode disabled; regression-tested.

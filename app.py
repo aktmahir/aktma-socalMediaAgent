@@ -1,6 +1,10 @@
 import argparse
+import os
 from datetime import datetime
+from getpass import getpass
+from pathlib import Path
 
+from social_media_agent.accounts import AccountStore
 from social_media_agent.generator import SocialMediaPostGenerator
 from social_media_agent.observability import configure_logging
 from social_media_agent.scheduler import PeriodicPostScheduler, parse_interval
@@ -34,6 +38,11 @@ def main() -> None:
         "--supervise-scheduled",
         action="store_true",
         help="Continuously recover and run persisted scheduled jobs.",
+    )
+    scheduler_actions.add_argument(
+        "--create-admin",
+        action="store_true",
+        help="Create the first multi-user administrator interactively.",
     )
     parser.add_argument("--topic", help="The topic or theme for the social media post.")
     parser.add_argument(
@@ -120,6 +129,24 @@ def main() -> None:
         help="Maximum concurrent jobs when --supervise-scheduled is enabled.",
     )
     args = parser.parse_args()
+
+    if args.create_admin:
+        output_root = Path(os.environ.get("SCHEDULED_OUTPUT_ROOT", "scheduled_posts"))
+        database_path = os.environ.get(
+            "AUTH_DATABASE_PATH",
+            str(output_root / "accounts.sqlite3"),
+        )
+        username = input("Administrator username: ").strip()
+        password = getpass("Administrator password (minimum 16 characters): ")
+        confirmation = getpass("Confirm administrator password: ")
+        if password != confirmation:
+            parser.error("Passwords do not match.")
+        try:
+            AccountStore(database_path).create_initial_admin(username, password)
+        except ValueError as exc:
+            parser.error(str(exc))
+        print(f"Created initial administrator '{username}'.")
+        return
 
     provider_model = args.provider_model or (
         args.openai_model if args.ai_provider == "openai" else None

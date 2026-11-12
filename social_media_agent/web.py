@@ -15,12 +15,14 @@ from flask import Flask, Response, g, jsonify, redirect, render_template, reques
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from flask_wtf.csrf import CSRFError, CSRFProtect
+from werkzeug.exceptions import Forbidden, NotFound
 from werkzeug.datastructures import FileStorage
 from werkzeug.exceptions import HTTPException, RequestEntityTooLarge
 from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.utils import secure_filename
 
 from .generator import SocialMediaPostGenerator
+from .accounts import AccountStore
 from .media_analysis import MediaAnalysisError, analyze_media, scan_for_malware
 from .observability import (
     RequestMetrics,
@@ -196,16 +198,22 @@ class _TrustedProxyMiddleware:
 
 def create_app() -> Flask:
     app = Flask(__name__, template_folder="templates")
+    multi_user_auth_enabled = os.environ.get(
+        "MULTI_USER_AUTH_ENABLED", ""
+    ).lower() in {"1", "true", "yes"}
     configured_secret = _configured_secret("FLASK_SECRET_KEY")
-    auth_username = os.environ.get("WEB_AUTH_USERNAME", "")
-    auth_password = _configured_secret("WEB_AUTH_PASSWORD")
+    auth_username = "" if multi_user_auth_enabled else os.environ.get("WEB_AUTH_USERNAME", "")
+    auth_password = "" if multi_user_auth_enabled else _configured_secret("WEB_AUTH_PASSWORD")
     prometheus_username = os.environ.get("PROMETHEUS_USERNAME", "")
     prometheus_password = _configured_secret("PROMETHEUS_PASSWORD")
-    if bool(auth_username) != bool(auth_password):
+    if (
+        not multi_user_auth_enabled
+        and bool(auth_username) != bool(auth_password)
+    ):
         raise RuntimeError(
             "WEB_AUTH_USERNAME and WEB_AUTH_PASSWORD must be configured together."
         )
-    if auth_password and len(auth_password) < 16:
+    if not multi_user_auth_enabled and auth_password and len(auth_password) < 16:
         raise RuntimeError("WEB_AUTH_PASSWORD must be at least 16 characters long.")
     if bool(prometheus_username) != bool(prometheus_password):
         raise RuntimeError(
@@ -243,7 +251,10 @@ def create_app() -> Flask:
         PRODUCTION_SECRET_CONFIGURED=len(configured_secret.encode("utf-8")) >= 32,
         WEB_AUTH_USERNAME=auth_username,
         WEB_AUTH_PASSWORD=auth_password,
-        AUTHENTICATION_CONFIGURED=bool(auth_username and auth_password),
+        MULTI_USER_AUTH_ENABLED=multi_user_auth_enabled,
+        AUTHENTICATION_CONFIGURED=(
+            multi_user_auth_enabled or bool(auth_username and auth_password)
+        ),
         PROMETHEUS_USERNAME=prometheus_username,
         PROMETHEUS_PASSWORD=prometheus_password,
         PROMETHEUS_AUTH_CONFIGURED=bool(prometheus_username and prometheus_password),
@@ -268,6 +279,18 @@ def create_app() -> Flask:
             ).expanduser().resolve()
         ),
         SCHEDULER_DB_PATH=os.environ.get("SCHEDULER_DB_PATH", "").strip(),
+        AUTH_DATABASE_PATH=os.environ.get(
+            "AUTH_DATABASE_PATH",
+            str(
+                Path(
+                    os.environ.get(
+                        "SCHEDULED_OUTPUT_ROOT",
+                        str(Path.cwd() / "scheduled_posts"),
+                    )
+                ).expanduser().resolve()
+                / "accounts.sqlite3"
+            ),
+        ),
         SENTRY_DSN=os.environ.get("SENTRY_DSN", ""),
         SENTRY_ENVIRONMENT=os.environ.get("SENTRY_ENVIRONMENT", "development"),
         RATELIMIT_HEADERS_ENABLED=True,
@@ -301,6 +324,11 @@ def create_app() -> Flask:
         app.config["SENTRY_ENVIRONMENT"],
     )
     UPLOAD_FOLDER.mkdir(parents=True, exist_ok=True)
+    account_store = (
+        AccountStore(app.config["AUTH_DATABASE_PATH"])
+        if multi_user_auth_enabled
+        else None
+    )
     generator = SocialMediaPostGenerator()
     request_metrics = RequestMetrics(Path(app.config["OBSERVABILITY_DB_PATH"]))
     scheduler_database_path = app.config["SCHEDULER_DB_PATH"] or str(
@@ -319,7 +347,7 @@ def create_app() -> Flask:
             "language": "English",
             "interval": "",
             "count": 0,
-            "scheduled_output": "",
+            "scheduled_output": "." if multi_user_auth_enabled else "",
             "provider_vision": False,
         }
 
@@ -339,6 +367,16 @@ def create_app() -> Flask:
         if session_age < 0 or session_age >= WEB_SESSION_MAX_AGE_SECONDS:
             session.clear()
             return False
+        if multi_user_auth_enabled:
+            user_id = session.get("user_id")
+            if not isinstance(user_id, int) or account_store is None:
+                session.clear()
+                return False
+            user = account_store.get_user(user_id)
+            if user is None:
+                session.clear()
+                return False
+            g.current_user = user
         return True
 
     @app.before_request
@@ -365,9 +403,22 @@ def create_app() -> Flask:
                 return response
         if not app.config["AUTHENTICATION_CONFIGURED"]:
             return None
-        if request.endpoint in {"login", "health", "readiness", "static"}:
+        if request.endpoint in {
+            "login",
+            "accept_invitation",
+            "health",
+            "readiness",
+            "static",
+        }:
             return None
         if authenticated_session_is_valid():
+            if request.endpoint in {
+                "admin_users",
+                "create_invitation",
+                "set_user_role",
+                "set_user_status",
+            } and getattr(g, "current_user", {}).get("role") != "admin":
+                raise Forbidden()
             return None
         return redirect(url_for("login"))
 
@@ -486,6 +537,11 @@ def create_app() -> Flask:
                 and check("shared_rate_limit_storage", limiter.storage.check)
             ),
         }
+        if multi_user_auth_enabled and account_store is not None:
+            checks["accounts_storage"] = check(
+                "accounts_storage",
+                account_store.check_storage,
+            )
         ready = all(checks.values())
         response_data: dict[str, object] = {
             "status": "ready" if ready else "not_ready"
@@ -564,19 +620,29 @@ def create_app() -> Flask:
 
         error_message = None
         if request.method == "POST":
-            username_matches = secrets.compare_digest(
-                request.form.get("username", "").encode("utf-8"),
-                app.config["WEB_AUTH_USERNAME"].encode("utf-8"),
-            )
-            password_matches = secrets.compare_digest(
-                request.form.get("password", "").encode("utf-8"),
-                app.config["WEB_AUTH_PASSWORD"].encode("utf-8"),
-            )
-            if username_matches and password_matches:
+            username = request.form.get("username", "")
+            password = request.form.get("password", "")
+            if multi_user_auth_enabled:
+                user = account_store.authenticate(username, password) if account_store else None
+                authenticated = user is not None
+            else:
+                username_matches = secrets.compare_digest(
+                    username.encode("utf-8"),
+                    app.config["WEB_AUTH_USERNAME"].encode("utf-8"),
+                )
+                password_matches = secrets.compare_digest(
+                    password.encode("utf-8"),
+                    app.config["WEB_AUTH_PASSWORD"].encode("utf-8"),
+                )
+                authenticated = username_matches and password_matches
+                user = None
+            if authenticated:
                 session.clear()
                 session.permanent = True
                 session["authenticated"] = True
                 session["authenticated_at"] = time.time()
+                if user is not None:
+                    session["user_id"] = user["id"]
                 log_event(
                     logger,
                     "auth.login_succeeded",
@@ -590,9 +656,121 @@ def create_app() -> Flask:
             )
             error_message = "Invalid username or password."
 
-        return render_template("login.html", error_message=error_message), (
+        return render_template(
+            "login.html",
+            error_message=error_message,
+            multi_user=multi_user_auth_enabled,
+        ), (
             401 if error_message else 200
         )
+
+    @app.route("/accept-invitation", methods=["GET", "POST"])
+    @limiter.limit("5 per minute", methods=["POST"], override_defaults=False)
+    def accept_invitation():
+        if not multi_user_auth_enabled or account_store is None:
+            raise NotFound()
+        error_message = None
+        if request.method == "POST":
+            token = request.form.get("invitation", "").strip()
+            password = request.form.get("password", "")
+            confirmation = request.form.get("confirm_password", "")
+            if password != confirmation:
+                error_message = "Passwords do not match."
+            else:
+                try:
+                    account_store.accept_invitation(
+                        token,
+                        request.form.get("username", ""),
+                        password,
+                    )
+                    return redirect(url_for("login"))
+                except ValueError as error:
+                    error_message = str(error)
+        return render_template(
+            "accept_invitation.html",
+            error_message=error_message,
+        ), (400 if error_message else 200)
+
+    @app.get("/admin/users")
+    def admin_users():
+        if not multi_user_auth_enabled or account_store is None:
+            raise NotFound()
+        return render_template(
+            "admin_users.html",
+            users=account_store.list_users(),
+            current_user_id=int(g.current_user["id"]),
+            invitation_token=None,
+            status_message=None,
+            status_type=None,
+        )
+
+    @app.post("/admin/invitations")
+    def create_invitation():
+        if not multi_user_auth_enabled or account_store is None:
+            raise NotFound()
+        try:
+            token = account_store.create_invitation(
+                request.form.get("role", ""),
+                int(g.current_user["id"]),
+            )
+        except ValueError as error:
+            return render_template(
+                "admin_users.html",
+                users=account_store.list_users(),
+                current_user_id=int(g.current_user["id"]),
+                invitation_token=None,
+                status_message=str(error),
+                status_type="error",
+            ), 400
+        return render_template(
+            "admin_users.html",
+            users=account_store.list_users(),
+            current_user_id=int(g.current_user["id"]),
+            invitation_token=token,
+            status_message="Share this one-time invitation token with the new user. It expires in 24 hours.",
+            status_type="success",
+        )
+
+    @app.post("/admin/users/<int:user_id>/role")
+    def set_user_role(user_id: int):
+        if not multi_user_auth_enabled or account_store is None:
+            raise NotFound()
+        try:
+            account_store.set_user_role(user_id, request.form.get("role", ""))
+            status_message = "User role updated."
+            status_type = "success"
+        except ValueError as error:
+            status_message = str(error)
+            status_type = "error"
+        return render_template(
+            "admin_users.html",
+            users=account_store.list_users(),
+            current_user_id=int(g.current_user["id"]),
+            invitation_token=None,
+            status_message=status_message,
+            status_type=status_type,
+        ), (400 if status_type == "error" else 200)
+
+    @app.post("/admin/users/<int:user_id>/status")
+    def set_user_status(user_id: int):
+        if not multi_user_auth_enabled or account_store is None:
+            raise NotFound()
+        try:
+            active = request.form.get("active") == "true"
+            account_store.set_user_status(user_id, active)
+            status_message = "User status updated."
+            status_type = "success"
+        except ValueError as error:
+            status_message = str(error)
+            status_type = "error"
+        return render_template(
+            "admin_users.html",
+            users=account_store.list_users(),
+            current_user_id=int(g.current_user["id"]),
+            invitation_token=None,
+            status_message=status_message,
+            status_type=status_type,
+        ), (400 if status_type == "error" else 200)
 
     @app.post("/logout")
     def logout():
@@ -617,7 +795,11 @@ def create_app() -> Flask:
             values["language"] = request.form.get("language", "English")
             values["interval"] = request.form.get("interval", "").strip()
             values["provider_vision"] = request.form.get("provider_vision") == "yes"
-            values["scheduled_output"] = request.form.get("scheduled_output", "scheduled_posts").strip() or "scheduled_posts"
+            default_output = "." if multi_user_auth_enabled else "scheduled_posts"
+            values["scheduled_output"] = (
+                request.form.get("scheduled_output", default_output).strip()
+                or default_output
+            )
 
             if not values["topic"] and status_message is None:
                 status_message = "Topic is required."
@@ -652,9 +834,14 @@ def create_app() -> Flask:
             scheduled_output_path = None
             if interval_seconds is not None and status_message is None:
                 try:
+                    scheduled_root = Path(app.config["SCHEDULED_OUTPUT_ROOT"])
+                    if multi_user_auth_enabled:
+                        scheduled_root = scheduled_root / "users" / str(
+                            int(g.current_user["id"])
+                        )
                     scheduled_output_path = _resolve_scheduled_output(
                         values["scheduled_output"],
-                        Path(app.config["SCHEDULED_OUTPUT_ROOT"]),
+                        scheduled_root,
                     )
                 except ValueError as exc:
                     status_message = str(exc)
@@ -664,12 +851,15 @@ def create_app() -> Flask:
                 status_message = "Upload only one image or video file at a time."
             elif media_files and media_files[0].filename and status_message is None:
                 try:
+                    upload_folder = Path(app.config["UPLOAD_FOLDER"])
+                    if multi_user_auth_enabled:
+                        upload_folder = upload_folder / str(int(g.current_user["id"]))
                     stored_name = _save_uploaded_media(
                         media_files[0],
-                        Path(app.config["UPLOAD_FOLDER"]),
+                        upload_folder,
                         values["media_type"],
                     )
-                    stored_path = Path(app.config["UPLOAD_FOLDER"]) / stored_name
+                    stored_path = upload_folder / stored_name
                     analysis_complete = False
                     try:
                         malware_scan = scan_for_malware(stored_path)
@@ -717,13 +907,31 @@ def create_app() -> Flask:
                 scheduler = PeriodicPostScheduler(
                     generator,
                     output_dir=str(scheduled_output_path),
-                    database_path=app.config["SCHEDULER_DB_PATH"] or None,
+                    database_path=(
+                        app.config["SCHEDULER_DB_PATH"]
+                        or (
+                            str(
+                                Path(app.config["SCHEDULED_OUTPUT_ROOT"])
+                                / "scheduler.sqlite3"
+                            )
+                            if multi_user_auth_enabled
+                            else None
+                        )
+                    ),
                 )
-                job_id = scheduler.create_job(
-                    post_config,
-                    interval_seconds=interval_seconds,
-                    count=values["count"],
-                )
+                if multi_user_auth_enabled:
+                    job_id = scheduler.create_job(
+                        post_config,
+                        interval_seconds=interval_seconds,
+                        count=values["count"],
+                        owner_id=int(g.current_user["id"]),
+                    )
+                else:
+                    job_id = scheduler.create_job(
+                        post_config,
+                        interval_seconds=interval_seconds,
+                        count=values["count"],
+                    )
                 thread = Thread(
                     target=scheduler.run_scheduled_job,
                     kwargs={"job_id": job_id},
@@ -760,6 +968,8 @@ def create_app() -> Flask:
             status_type=status_type,
             values=values,
             auth_enabled=app.config["AUTHENTICATION_CONFIGURED"],
+            multi_user=multi_user_auth_enabled,
+            current_user=getattr(g, "current_user", None),
             platforms=PLATFORMS,
             media_types=MEDIA_TYPES,
             tones=TONES,
@@ -778,6 +988,6 @@ def main() -> None:
         "AUTHENTICATION_CONFIGURED"
     ]:
         raise RuntimeError(
-            "Configure WEB_AUTH_USERNAME and WEB_AUTH_PASSWORD before binding beyond localhost."
+            "Configure browser authentication before binding beyond localhost."
         )
     app.run(debug=False, host=host, port=5000)
