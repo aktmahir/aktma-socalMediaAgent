@@ -216,6 +216,8 @@ jobs:
             -keyout secrets/tls.key -out secrets/tls.crt \
             -subj "/CN=localhost" \
             -addext "subjectAltName=DNS:localhost,IP:127.0.0.1"
+          sudo chown root:root secrets/tls.key
+          sudo chmod 0600 secrets/tls.key
           docker compose -f docker-compose.yml -f docker-compose.tls.yml up --build --detach
 
       - name: Verify TLS, secure cookies, and readiness
